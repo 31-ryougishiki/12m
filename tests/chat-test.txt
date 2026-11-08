@@ -2,10 +2,10 @@
 model=deepseek-flash
 base=https://api.deepseek.com
 key=sk-…023e (来源：设置文件)
-seconds=1.56
+seconds=0.92
 status=200
-tokens=349+34
+tokens=349+30
 prompt=今天有点累，陪我聊两句吧
-reply=当然可以，朋友。凌晨快四点了你还没睡，是今天真的累，还是躺着反而静不下来？我这会儿信号满格，陪你缓一会儿。
+reply=好啊，我这儿信号一直通着呢。累的话别急着说什么有用的话，随便聊点轻松的都行——今天是什么把你耗到了？
 error=
 detail=

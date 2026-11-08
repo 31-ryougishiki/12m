@@ -192,7 +192,7 @@ namespace ElymsPet {
      string body=ReadBody(response);
      ChatOutcome outcome=ParseResponse(body,watch.Elapsed.TotalSeconds);
      if(outcome.Ok) outcome.Status=(int)response.StatusCode;
-     else {outcome.Status=outcome.Status==0?(int)response.StatusCode:outcome.Status;LogFailure(outcome);}
+     else {outcome.Detail=Redact(outcome.Detail,key);outcome.Status=outcome.Status==0?(int)response.StatusCode:outcome.Status;LogFailure(outcome);}
      return outcome;
     }
    } catch(WebException e) {
@@ -209,11 +209,12 @@ namespace ElymsPet {
      } catch {}
     }
     if(detail.Length==0) detail=e.Message;
+    detail=Redact(detail,key);
     ChatOutcome outcome=FromStatus(status,detail,seconds,e.Status);
     LogFailure(outcome);
     return outcome;
    } catch(Exception e) {
-    ChatOutcome outcome=ChatOutcome.Fail("连接时出了点问题，稍后再试一次？","exception: "+e.Message,0,watch.Elapsed.TotalSeconds);
+    ChatOutcome outcome=ChatOutcome.Fail("连接时出了点问题，稍后再试一次？","exception: "+Redact(e.Message,key),0,watch.Elapsed.TotalSeconds);
     LogFailure(outcome);
     return outcome;
    }
@@ -279,6 +280,10 @@ namespace ElymsPet {
   static string Trim(string text,int max) {
    text=(text??"").Replace("\r"," ").Replace("\n"," ").Trim();
    return text.Length<=max?text:text.Substring(0,max)+"…";
+  }
+  static string Redact(string text,string key) {
+   if(string.IsNullOrEmpty(text)||string.IsNullOrEmpty(key)) return text??"";
+   return text.Replace(key,MaskKey(key));
   }
   static void LogFailure(ChatOutcome outcome) {
    try {

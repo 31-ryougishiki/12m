@@ -2,7 +2,7 @@
 model=deepseek-flash
 base=https://api.deepseek.com
 key=sk-…023e (来源：设置文件)
-seconds=0.80
+seconds=0.74
 status=200
 tokens=23+1
 reply=接通

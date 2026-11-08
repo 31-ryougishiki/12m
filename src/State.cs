@@ -23,6 +23,12 @@ namespace ElymsPet {
   [DataMember] public DateTime FocusEnd = new DateTime(0, DateTimeKind.Utc);
   [DataMember] public double PausedSeconds = 0;
   [DataMember] public int FocusMinutes = 25;
+  [DataMember] public string ApiKey = "";
+  [DataMember] public string ApiBase = "https://api.deepseek.com";
+  [DataMember] public string ApiModel = "deepseek-flash";
+  [DataMember] public bool AiChat = true;
+  [DataMember] public bool AiThinking = false;
+  [DataMember] public int Schema = 2;
   public void Normalize() {
    Scale = double.IsNaN(Scale) || double.IsInfinity(Scale) ? 1 : Math.Max(.65, Math.Min(1.6, Scale));
    Energy = double.IsNaN(Energy) ? 90 : Math.Max(0, Math.Min(100, Energy));
@@ -31,6 +37,15 @@ namespace ElymsPet {
    Note = Note ?? ""; FocusKind = FocusKind ?? "专注";
    FocusMinutes = Math.Max(1, Math.Min(180, FocusMinutes));
    PausedSeconds = Math.Max(0, Math.Min(10800, PausedSeconds));
+   ApiKey = (ApiKey ?? "").Trim();
+   if (ApiKey.Length > 200) ApiKey = ApiKey.Substring(0, 200);
+   if (string.IsNullOrWhiteSpace(ApiBase)) ApiBase = "https://api.deepseek.com";
+   ApiBase = ApiBase.Trim();
+   if (ApiBase.Length > 300) ApiBase = ApiBase.Substring(0, 300);
+   if (string.IsNullOrWhiteSpace(ApiModel)) ApiModel = "deepseek-flash";
+   ApiModel = ApiModel.Trim();
+   if (ApiModel.Length > 80) ApiModel = ApiModel.Substring(0, 80);
+   if (Schema < 2) { Schema = 2; AiChat = true; }
   }
   public double Remaining(DateTime now) { return FocusEnd == DateTime.MinValue ? PausedSeconds : Math.Max(0,(FocusEnd-now).TotalSeconds); }
   public void StartFocus(int minutes, string kind, DateTime now) { FocusMinutes = Math.Max(1, Math.Min(180, minutes)); FocusKind = kind; PausedSeconds = 0; FocusEnd = now.AddMinutes(FocusMinutes); }
@@ -60,6 +75,12 @@ namespace ElymsPet {
     if(File.Exists(FilePath)) File.Replace(temp,FilePath,FilePath+".bak"); else File.Move(temp,FilePath);
     LastError=""; return true;
    } catch(Exception e) { LastError=e.Message; return false; }
+  }
+  public static void ForgetBackups() {
+   string[] paths=new string[]{FilePath+".bak",FilePath+".tmp"};
+   for(int i=0;i<paths.Length;i++) {
+    try {if(File.Exists(paths[i]))File.Delete(paths[i]);} catch {}
+   }
   }
  }
  public static class Dialogue {

@@ -47,6 +47,8 @@ namespace ElymsPet {
   public readonly PetState State;
   public Sprite Art;
   public ControlWindow Panel;
+  public readonly ChatSession Chat=new ChatSession();
+  public bool AiBusy;
   readonly Canvas canvas=new Canvas();
   readonly Border bubble=new Border();
   readonly TextBlock bubbleText=new TextBlock();
@@ -183,13 +185,14 @@ namespace ElymsPet {
    return "我在这个小窗口里，陪你处理眼前的事情。";
   }
   public void OpenPanel() {if(Panel==null) {Panel=new ControlWindow(this);Panel.Closed+=delegate {Panel=null;};} Panel.Show();Panel.Activate();}
+  public void OpenPanel(int tab) {OpenPanel();if(Panel!=null)Panel.SelectTab(tab);}
   public void Recover() {SetPassThrough(false);Show();Home();Say("我在这里，已经重新连接啦。",5);}
   public void SetPassThrough(bool enabled) {passThrough=enabled;if(handle!=IntPtr.Zero) {int ex=GetWindowLong(handle,GWL_EXSTYLE);SetWindowLong(handle,GWL_EXSTYLE,enabled?ex|WS_EX_TRANSPARENT:ex&~WS_EX_TRANSPARENT);} }
   MenuItem Item(string title,Action a) { var item=new MenuItem {Header=title};item.Click+=delegate {a();};return item; }
   MenuItem Check(string title,bool value,Action<bool> set) {var item=new MenuItem{Header=title,IsCheckable=true,IsChecked=value};item.Click+=delegate {set(item.IsChecked);Save();};return item;}
   ContextMenu BuildMenu() {
    var m=new ContextMenu {FontFamily=new FontFamily("Microsoft YaHei UI"),FontSize=13};
-   m.Items.Add(Item("打开陪伴面板",OpenPanel));m.Items.Add(Item("摸摸头",Pet));m.Items.Add(Item("投喂数据零食",Feed));m.Items.Add(Item("接通来电",Call));m.Items.Add(Item(State.Sleeping?"唤醒曳尔沐":"晚安，休息一会儿",SleepToggle));m.Items.Add(new Separator());
+   m.Items.Add(Item("打开陪伴面板",OpenPanel));m.Items.Add(Item("和曳尔沐聊聊",delegate {OpenPanel(0);}));m.Items.Add(Item("摸摸头",Pet));m.Items.Add(Item("投喂数据零食",Feed));m.Items.Add(Item("接通来电",Call));m.Items.Add(Item(State.Sleeping?"唤醒曳尔沐":"晚安，休息一会儿",SleepToggle));m.Items.Add(new Separator());
    m.Items.Add(Check("桌面散步",State.Wander,delegate(bool v) {State.Wander=v;follow=false;}));
    m.Items.Add(Check("跟随鼠标",follow,delegate(bool v) {follow=v;State.Wander=false;}));
    m.Items.Add(Check("始终置顶",State.Topmost,delegate(bool v) {State.Topmost=v;Topmost=v;}));
@@ -202,6 +205,7 @@ namespace ElymsPet {
    using(var s=Assembly.GetExecutingAssembly().GetManifestResourceStream("pet.ico")) {tray.Icon=new System.Drawing.Icon(s);}
    var m=new Forms.ContextMenuStrip();
    m.Items.Add("打开陪伴面板",null,delegate {Dispatcher.Invoke(new Action(OpenPanel));});
+   m.Items.Add("和曳尔沐聊聊",null,delegate {Dispatcher.Invoke(new Action(delegate {OpenPanel(0);}));});
    m.Items.Add("召回 / 解除鼠标穿透",null,delegate {Dispatcher.Invoke(new Action(Recover));});
    m.Items.Add("睡眠 / 唤醒",null,delegate {Dispatcher.Invoke(new Action(SleepToggle));});
    m.Items.Add("隐藏 / 显示",null,delegate {Dispatcher.Invoke(new Action(delegate {if(IsVisible) Hide();else Show();}));});

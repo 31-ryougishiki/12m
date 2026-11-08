@@ -7,3 +7,9 @@ bin/
 obj/
 *.user
 *.suo
+
+# 本机 API 密钥与私人设置，不要提交
+api-key.txt
+**/api-key.txt
+settings.json
+settings.json.bak

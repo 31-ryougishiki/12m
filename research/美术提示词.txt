@@ -1,0 +1,20 @@
+生成方式：内置 image_gen；最终采用首版九宫格精灵图 assets/sprites.png。角色参考为 reference-elyms.webp。
+第二次透明边缘修订仅作为候选，未采用。原始 alpha 低值边缘在透明图片查看器中可能显色；实际 Windows 合成与深色面板显示正常。
+
+首次生成提示词：
+Use case: stylized-concept. Asset type: production Windows desktop pet spritesheet.
+Reference image is visual identity reference ONLY: Elyms / 曳尔沐 from Neverness to Everness in her current default deputy-uniform outfit. Create a beautifully drawn clean anime chibi sprite sheet of THIS character, not the separate story person Y and not a childhood version.
+Canvas: square 1536x1536, exact 3 columns by 3 rows of equally sized cells (512x512). Transparent background with true alpha, no panels, grid, shadows, labels, letters, watermarks, or background. Each character FULL BODY entirely within own cell with ample empty border, feet baseline at 92% of cell height, head at 8%, same scale, centered. Nine distinct poses row-major:
+0 standing idle with gentle knowing smile, eyes open;
+1 identical standing idle eyes closed blinking;
+2 walking toward viewer's right, left foot forward;
+3 walking toward viewer's right, right foot forward;
+4 cheerful greeting hand waving;
+5 delighted smiling with hands clasped in front;
+6 holding a small pale blue phone beside ear, playful smile;
+7 sitting asleep curled gently, eyes closed;
+8 lifted by invisible hand, tiny surprised expression and feet dangling.
+Identity: long flowing SILVER WHITE hair with pale periwinkle undersides and curled ahoge, side swept layered fringe, pink-blue gradient eyes, small pink butterfly hair clip, large blue bow behind neck, white off-shoulder structured futuristic short uniform dress with sapphire front panel, dark gloves, cyan iridescent butterfly accents, small hanging work badge, pale blue white knee boots. Match reference clothing silhouette and colors faithfully but simplify details to read at desktop scale. Cute 2.6-head-tall chibi, modest stylization, refined crisp navy/periwinkle outlines, soft cel shading, saturated cyan and lilac accent details, professional consistent game asset. No extra characters. All nine cells same character and outfit.
+
+候选修订提示词：
+Edit target: this transparent 3x3 chibi Elyms sprite sheet. Preserve all nine poses, character identity, outfit, exact pose order and square 3x3 equal-cell alignment. Clean up the alpha cutout: REMOVE ALL the stray blue and cyan background haze, white and black speckle noise and pixelated halos outside the character silhouettes. Only the solid clean chibi character and small intentional gesture symbols remain. Every region outside the smooth antialiased character silhouettes must be fully transparent, zero alpha. No background color or shadow. Keep white hair opaque. Add adequate empty transparent margin inside all nine cells so hair never touches the top edge. Keep the sprites fully inside their cells and at consistent scale. True transparent PNG.

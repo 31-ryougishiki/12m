@@ -1,0 +1,12 @@
+# dsh-elyms-bridge bundle patch: inserts the loopback workbench bridge.
+# The plugin never opens a window. It starts a 127.0.0.1 HTTP server whose
+# handshake file is read by the Elyms desktop pet, and creates real DSH
+# sessions through the session controller gateway.
+- insert:
+    - id: elyms-bridge
+      name: 'dsh-elyms-bridge'
+      config:
+        enabled: true
+        workspace: 'D:/code/12m'
+        defaultPermission: 'workspace-write'
+        webUrl: 'http://127.0.0.1:3080'

@@ -1,0 +1,12 @@
+# dsh-elyms-pet bundle patch: inserts the desktop-pet launcher into a DSH profile.
+# The plugin is host-only: it spawns dist/ElymsPet.exe after DSH starts.
+# Default executable resolution is ../../dist/ElymsPet.exe relative to this
+# package, so this checkout works without configuration. Set exePath when the
+# package is installed somewhere else.
+- insert:
+    - id: elyms-pet
+      name: 'dsh-elyms-pet'
+      config:
+        enabled: true
+        startDelayMs: 1200
+        leaveRunning: true

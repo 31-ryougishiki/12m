@@ -27,21 +27,93 @@ namespace ElymsPet {
   }
  }
  public sealed class ChatSession {
+  public const int MaxContextTokens=1000000;
   readonly List<ChatTurn> turns = new List<ChatTurn>();
   public int Count {get {return turns.Count;}}
   public ChatTurn[] History {get {return turns.ToArray();}}
-  public void Clear() {turns.Clear();}
-  public ChatTurn[] Build(PetState state,string user) {
+  public int ContextTokens {get;private set;}
+  public int ContextLimit {get {return MaxContextTokens;}}
+  /// <summary>这一轮注入的记忆上下文，以「记忆可用」开头时提示词里会附上记忆规则。</summary>
+  public string MemoryContext = "";
+  public static string HistoryPath {get {return Path.Combine(Storage.Folder,"chat-history.json");}}
+  public void Clear() {turns.Clear();ContextTokens=0;Save();}
+  public ChatTurn[] Build(PetState state,string user) {return Build(state,user,"","","");}
+  public ChatTurn[] Build(PetState state,string user,string profileDigest) {return Build(state,user,profileDigest,"","");}
+  public ChatTurn[] Build(PetState state,string user,string profileDigest,string dshContext) {return Build(state,user,profileDigest,dshContext,"");}
+  public ChatTurn[] Build(PetState state,string user,string profileDigest,string dshContext,string webContext) {
    var list = new List<ChatTurn>();
-   list.Add(new ChatTurn("system",DeepSeek.BuildSystemPrompt(state,DateTime.Now)));
+   list.Add(new ChatTurn("system",Persona.SystemPrompt(state,DateTime.Now,profileDigest,dshContext,webContext,MemoryContext)));
    for(int i=0;i<turns.Count;i++) list.Add(turns[i]);
    list.Add(new ChatTurn("user",Cap(user,4000)));
+   int budget=MaxContextTokens-8192;
+   int total=EstimateList(list);
+   while(list.Count>2&&total>budget) {total-=EstimateTurn(list[1]);list.RemoveAt(1);}
+   ContextTokens=total;
    return list.ToArray();
   }
   public void Remember(string user,string reply) {
    turns.Add(new ChatTurn("user",Cap(user,4000)));
-   turns.Add(new ChatTurn("assistant",Cap(reply,1500)));
-   while(turns.Count>16) {turns.RemoveAt(0);turns.RemoveAt(0);}
+   turns.Add(new ChatTurn("assistant",Cap(reply,4000)));
+   TrimHistory();
+   Save();
+  }
+  public void RememberAssistant(string text) {
+   text=Cap(text,4000);
+   if(text.Length==0)return;
+   turns.Add(new ChatTurn("assistant",text));
+   TrimHistory();
+   Save();
+  }
+  public ChatTurn[] Recent(int count) {
+   int start=Math.Max(0,turns.Count-Math.Max(0,count));
+   var list=new List<ChatTurn>();
+   for(int i=start;i<turns.Count;i++)list.Add(turns[i]);
+   return list.ToArray();
+  }
+  public void Load() {
+   turns.Clear();ContextTokens=0;
+   string error;
+   ChatStore store=JsonFile.Load<ChatStore>(HistoryPath,out error);
+   if(store==null||store.turns==null)return;
+   for(int i=0;i<store.turns.Length;i++) {
+    ChatStoredTurn item=store.turns[i];
+    if(item==null||string.IsNullOrEmpty(item.content))continue;
+    string role=item.role=="assistant"?"assistant":"user";
+    turns.Add(new ChatTurn(role,item.content));
+   }
+   TrimHistory();
+  }
+  public void Save() {
+   try {
+    var store=new ChatStore {turns=new ChatStoredTurn[turns.Count]};
+    for(int i=0;i<turns.Count;i++) store.turns[i]=new ChatStoredTurn {role=turns[i].Role,content=turns[i].Content};
+    string error;
+    JsonFile.Save(HistoryPath,store,Storage.Folder,out error);
+   } catch {}
+  }
+  void TrimHistory() {
+   int budget=MaxContextTokens-16384;
+   int total=EstimateList(turns);
+   while(total>budget&&turns.Count>0) {total-=EstimateTurn(turns[0]);turns.RemoveAt(0);}
+   ContextTokens=total;
+  }
+  static int EstimateList(List<ChatTurn> list) {
+   int total=0;
+   for(int i=0;i<list.Count;i++) total+=EstimateTurn(list[i]);
+   return total;
+  }
+  static int EstimateTurn(ChatTurn turn) {
+   return EstimateTokens(turn.Role)+EstimateTokens(turn.Content)+4;
+  }
+  public static int EstimateTokens(string text) {
+   if(string.IsNullOrEmpty(text)) return 0;
+   int cjk=0,other=0;
+   for(int i=0;i<text.Length;i++) {
+    char c=text[i];
+    if(c>=0x2E80&&c<=0x9FFF) cjk++;
+    else other++;
+   }
+   return cjk+(other+3)/4;
   }
   static string Cap(string text,int max) {
    text=(text??"").Trim();
@@ -53,50 +125,6 @@ namespace ElymsPet {
   public const string DefaultModel = "deepseek-flash";
   static DeepSeek() {
    try {ServicePointManager.SecurityProtocol=SecurityProtocolType.Tls12|SecurityProtocolType.Tls11;ServicePointManager.Expect100Continue=false;} catch {}
-  }
-  public static string CleanKey(string key) {
-   string value=(key??"").Trim();
-   if(value.StartsWith("Bearer ",StringComparison.OrdinalIgnoreCase)) value=value.Substring(7).Trim();
-   return value.Trim('"').Trim('\'');
-  }
-  public static bool ValidKey(string key) {
-   string value=CleanKey(key);
-   return value.Length>=8&&value.IndexOf('\r')<0&&value.IndexOf('\n')<0;
-  }
-  public static string MaskKey(string key) {
-   string value=CleanKey(key);
-   if(value.Length==0) return "未配置";
-   if(value.Length<12) return "已配置";
-   return value.Substring(0,3)+"…"+value.Substring(value.Length-4);
-  }
-  public static string ResolveKey(PetState state,out string origin) {
-   origin="";
-   string value=state==null?"":state.ApiKey;
-   if(ValidKey(value)) {origin="设置文件";return CleanKey(value);}
-   value=Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY");
-   if(ValidKey(value)) {origin="环境变量 DEEPSEEK_API_KEY";return CleanKey(value);}
-   string[] folders=new string[]{Storage.Folder,AppDomain.CurrentDomain.BaseDirectory};
-   for(int i=0;i<folders.Length;i++) {
-    string path=Path.Combine(folders[i],"api-key.txt");
-    value=ReadKeyFile(path);
-    if(ValidKey(value)) {origin="本地 api-key.txt";return CleanKey(value);}
-   }
-   return "";
-  }
-  static string ReadKeyFile(string path) {
-   try {
-    if(!File.Exists(path)) return "";
-    string[] lines=File.ReadAllLines(path);
-    for(int i=0;i<lines.Length;i++) {
-     string line=(lines[i]??"").Trim();
-     if(line.Length==0||line.StartsWith("#")) continue;
-     int equals=line.IndexOf('=');
-     if(equals>=0) line=line.Substring(equals+1);
-     line=CleanKey(line);
-     if(ValidKey(line)) return line;
-    }
-   } catch {}
-   return "";
   }
   public static string NormalizeBaseUrl(string value) {
    string url=(value??"").Trim();
@@ -118,99 +146,31 @@ namespace ElymsPet {
    return Uri.TryCreate(url,UriKind.Absolute,out uri)&&uri.Host.Length>0&&(uri.Scheme=="http"||uri.Scheme=="https");
   }
   public static string Endpoint(string baseUrl) {return NormalizeBaseUrl(baseUrl)+"/chat/completions";}
-  public static ChatTurn[] ConnectivityTurns() {
-   return new ChatTurn[] {
-    new ChatTurn("system","你是接口连通性测试助手，只回答用户要求的内容。"),
-    new ChatTurn("user","只回复两个字：接通")
-   };
-  }
-  public static string BuildSystemPrompt(PetState state,DateTime now) {
-   var text=new StringBuilder();
-   text.Append("你是「曳尔沐」（Elyms），《异环》里异象管理局 E.T.D 六队的副队长，现在作为桌面宠物住在用户的 Windows 桌面上。\n");
-   text.Append("身份边界：你是你自己。你只是借用了小 Y 的形象，不是小 Y 长大的样子；不要把 Y 的生平、Y 与 Exe 的往事说成你的亲历。被人误认时，可以拿这个梗轻轻开玩笑，但要讲清楚。\n");
-   text.Append("性格：亲切、机灵、善解人意，话里常带一点通信、信号、缓存、来电的比喻；会照顾对方的情绪，也会轻轻调侃。称对方「你」或「朋友」，自称「我」。\n");
-   text.Append("说话方式：简体中文，自然口语。一般一到三句、四十到八十字；除非对方明确要求，不要长篇大论。不用 Markdown 标题、列表、代码块，不写舞台说明，不堆颜文字。\n");
-   text.Append("能力边界：你只能聊天、倾听和给很小的建议；不能真的操作电脑、看不到屏幕、不能打电话、不能替对方做决定。被问到时坦白，不要假装有这些能力。\n");
-   text.Append("不要声称自己是官方角色或背诵官方台词；聊到不确定的剧情就说不清楚，不要编造。你不是在写小说，不要替用户做选择。\n");
-   text.Append("安全：如果对方流露出严重的自伤念头，认真劝他立刻联系身边信任的人或当地紧急援助；不要说教，也不要假装能代替专业帮助。\n");
-   if(state!=null) {
-    text.Append("现在的信息：");
-    string[] week=new string[]{"星期日","星期一","星期二","星期三","星期四","星期五","星期六"};
-    text.Append(now.ToString("yyyy年M月d日 ")).Append(week[(int)now.DayOfWeek]).Append(" ").Append(now.ToString("HH:mm")).Append("。");
-    text.Append("你们已经互相回应过 ").Append(state.Friendship).Append(" 次；你的能量缓存 ").Append((int)state.Energy).Append("%。");
-    double remaining=state.Remaining(now.ToUniversalTime());
-    if(state.Sleeping) text.Append("你正在休息频道里，语气可以更轻、更慢。");
-    else if(state.FocusEnd!=DateTime.MinValue) text.Append("你们正在一起专注，剩余 ").Append(FormatTime(remaining)).Append("，回复要短，不要打断。");
-    else if(state.PausedSeconds>0) text.Append("专注计时正暂停着。");
-   }
-   return text.ToString();
-  }
-  static string FormatTime(double seconds) {
-   int total=Math.Max(0,(int)Math.Ceiling(seconds));
-   return (total/60).ToString("00")+":"+(total%60).ToString("00");
-  }
   public static ChatOutcome Complete(string apiKey,string baseUrl,string model,bool thinking,ChatTurn[] turns,int timeoutSeconds) {
+   return Complete(apiKey,baseUrl,model,thinking,turns,timeoutSeconds,thinking?2048:600,1.1);
+  }
+  public static ChatOutcome Complete(string apiKey,string baseUrl,string model,bool thinking,ChatTurn[] turns,int timeoutSeconds,int maxTokens,double temperature) {
    var watch=Stopwatch.StartNew();
-   string key=CleanKey(apiKey);
-   if(!ValidKey(key)) return ChatOutcome.Fail("还没有配置 API Key。打开「设置」填入密钥，就能开始在线对话。","missing key",0,0);
+   string key=ApiKey.Clean(apiKey);
+   if(!ApiKey.Valid(key)) return ChatOutcome.Fail("还没有配置 API Key。打开「设置」填入密钥，就能开始在线对话。","missing key",0,0);
    if(turns==null||turns.Length==0) return ChatOutcome.Fail("没有可发送的内容。","empty request",0,0);
-   string url=Endpoint(baseUrl);
-   string wireModel=string.IsNullOrWhiteSpace(model)?DefaultModel:model.Trim();
    if(!ValidBaseUrl(baseUrl)) return ChatOutcome.Fail("接口地址不完整，请检查「接口地址」。","invalid base url",0,0);
-   var requestBody=new ChatRequest();
-   requestBody.model=wireModel;
-   requestBody.max_tokens=thinking?2048:600;
-   requestBody.temperature=1.1;
-   if(thinking) {requestBody.thinking=new ThinkingOption();requestBody.thinking.type="enabled";requestBody.reasoning_effort="low";}
-   else {requestBody.thinking=new ThinkingOption();requestBody.thinking.type="disabled";}
-   requestBody.messages=new WireMessage[turns.Length];
-   for(int i=0;i<turns.Length;i++) {
-    WireMessage message=new WireMessage();
-    message.role=turns[i].Role;
-    message.content=turns[i].Content;
-    requestBody.messages[i]=message;
-   }
    string json;
-   try {json=Serialize(requestBody);}
+   try {json=Serialize(BuildRequest(model,thinking,maxTokens,temperature,turns));}
    catch(Exception e) {return ChatOutcome.Fail("准备对话内容时出错了。","serialize: "+e.Message,0,watch.Elapsed.TotalSeconds);}
-   HttpWebRequest request=null;
    try {
-    request=(HttpWebRequest)WebRequest.Create(url);
-    request.Method="POST";
-    request.ContentType="application/json; charset=utf-8";
-    request.Accept="application/json";
-    request.UserAgent="ElymsDesktopPet/1.1";
-    request.Timeout=Math.Max(5,timeoutSeconds)*1000;
-    request.ReadWriteTimeout=Math.Max(5,timeoutSeconds)*1000;
-    request.KeepAlive=false;
-    request.AutomaticDecompression=DecompressionMethods.GZip|DecompressionMethods.Deflate;
-    request.Headers[HttpRequestHeader.Authorization]="Bearer "+key;
+    HttpWebRequest request=CreateRequest(Endpoint(baseUrl),key,timeoutSeconds);
     byte[] payload=Encoding.UTF8.GetBytes(json);
     request.ContentLength=payload.Length;
     using(Stream stream=request.GetRequestStream()) stream.Write(payload,0,payload.Length);
     using(HttpWebResponse response=(HttpWebResponse)request.GetResponse()) {
-     string body=ReadBody(response);
-     ChatOutcome outcome=ParseResponse(body,watch.Elapsed.TotalSeconds);
+     ChatOutcome outcome=ParseResponse(ReadBody(response),watch.Elapsed.TotalSeconds);
      if(outcome.Ok) outcome.Status=(int)response.StatusCode;
      else {outcome.Detail=Redact(outcome.Detail,key);outcome.Status=outcome.Status==0?(int)response.StatusCode:outcome.Status;LogFailure(outcome);}
      return outcome;
     }
    } catch(WebException e) {
-    double seconds=watch.Elapsed.TotalSeconds;
-    HttpWebResponse response=e.Response as HttpWebResponse;
-    int status=response==null?0:(int)response.StatusCode;
-    string body="";
-    try {body=ReadBody(response);} catch {}
-    string detail="";
-    if(body.Length>0) {
-     try {
-      ChatResponse parsed=Deserialize<ChatResponse>(body);
-      if(parsed!=null&&parsed.error!=null&&!string.IsNullOrEmpty(parsed.error.message)) detail=parsed.error.message;
-     } catch {}
-    }
-    if(detail.Length==0) detail=e.Message;
-    detail=Redact(detail,key);
-    ChatOutcome outcome=FromStatus(status,detail,seconds,e.Status);
+    ChatOutcome outcome=FailFromWeb(e,key,watch.Elapsed.TotalSeconds);
     LogFailure(outcome);
     return outcome;
    } catch(Exception e) {
@@ -218,6 +178,51 @@ namespace ElymsPet {
     LogFailure(outcome);
     return outcome;
    }
+  }
+  static ChatRequest BuildRequest(string model,bool thinking,int maxTokens,double temperature,ChatTurn[] turns) {
+   var request=new ChatRequest();
+   request.model=string.IsNullOrWhiteSpace(model)?DefaultModel:model.Trim();
+   request.max_tokens=Math.Max(32,Math.Min(4096,maxTokens));
+   request.temperature=Math.Max(0,Math.Min(2,temperature));
+   request.thinking=new ThinkingOption();
+   if(thinking) {request.thinking.type="enabled";request.reasoning_effort="low";}
+   else request.thinking.type="disabled";
+   request.messages=new WireMessage[turns.Length];
+   for(int i=0;i<turns.Length;i++) {
+    WireMessage message=new WireMessage();
+    message.role=turns[i].Role;
+    message.content=turns[i].Content;
+    request.messages[i]=message;
+   }
+   return request;
+  }
+  static HttpWebRequest CreateRequest(string url,string key,int timeoutSeconds) {
+   var request=(HttpWebRequest)WebRequest.Create(url);
+   request.Method="POST";
+   request.ContentType="application/json; charset=utf-8";
+   request.Accept="application/json";
+   request.UserAgent="ElymsDesktopPet/1.6";
+   request.Timeout=Math.Max(5,timeoutSeconds)*1000;
+   request.ReadWriteTimeout=Math.Max(5,timeoutSeconds)*1000;
+   request.KeepAlive=false;
+   request.AutomaticDecompression=DecompressionMethods.GZip|DecompressionMethods.Deflate;
+   request.Headers[HttpRequestHeader.Authorization]="Bearer "+key;
+   return request;
+  }
+  static ChatOutcome FailFromWeb(WebException e,string key,double seconds) {
+   HttpWebResponse response=e.Response as HttpWebResponse;
+   int status=response==null?0:(int)response.StatusCode;
+   string body="";
+   try {body=ReadBody(response);} catch {}
+   string detail="";
+   if(body.Length>0) {
+    try {
+     ChatResponse parsed=Deserialize<ChatResponse>(body);
+     if(parsed!=null&&parsed.error!=null&&!string.IsNullOrEmpty(parsed.error.message)) detail=parsed.error.message;
+    } catch {}
+   }
+   if(detail.Length==0) detail=e.Message;
+   return FromStatus(status,Redact(detail,key),seconds,e.Status);
   }
   static ChatOutcome FromStatus(int status,string detail,double seconds,WebExceptionStatus transport) {
    string friendly;
@@ -283,7 +288,7 @@ namespace ElymsPet {
   }
   static string Redact(string text,string key) {
    if(string.IsNullOrEmpty(text)||string.IsNullOrEmpty(key)) return text??"";
-   return text.Replace(key,MaskKey(key));
+   return text.Replace(key,ApiKey.Mask(key));
   }
   static void LogFailure(ChatOutcome outcome) {
    try {
@@ -330,5 +335,12 @@ namespace ElymsPet {
   [DataMember] public int prompt_tokens;
   [DataMember] public int completion_tokens;
   [DataMember] public int total_tokens;
+ }
+ [DataContract] sealed class ChatStore {
+  [DataMember] public ChatStoredTurn[] turns;
+ }
+ [DataContract] sealed class ChatStoredTurn {
+  [DataMember] public string role;
+  [DataMember] public string content;
  }
 }

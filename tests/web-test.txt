@@ -1,0 +1,37 @@
+﻿PASS
+kind=search
+base=https://api.deepseek.com
+key=sk-…023e (来源：设置文件)
+seconds=0.40
+status=200
+sources=5
+error=
+detail=
+query=DeepSeek Search API
+result=1 | DeepSeek Search : moteur maison et API Search testés - DeepSeek | https://deepseek.fr/deepseek-search-api/ | DeepSeek | la recherche via DeepSeek Harness, Claude Code et Codex est gratuite jusqu’au 31 octobre 2026, 17 h (heure de Paris).
+- Notre test : quatre requêtes ont pris chacune environ une demi-seconde. Les résultats étaient récents et le plus souvent…
+result=2 | deepseek-search-fetch-mcp - DeepSeek Search Fetch MCP | https://pypi.org/project/deepseek-search-fetch-mcp/0.1.0/#security#1 | PyPI | # DeepSeek Search Fetch MCP
+...
+An MCP server that exposes DeepSeek Search and Fetch as two tools for AI clients. Search the web, narrow results by site, language, and date, then fetch a page as agent-friendly content without leaving the MC…
+result=3 | deepseek-search-everywhere-mcp - DeepSeek Search Everywhere MCP | https://pypi.org/project/deepseek-search-everywhere-mcp/#1 | PyPI | "mcpServers":
+...
+docker pull ghcr.io/radoxtech/deepseek-search-everywhere-mcp:latest
+
+Stdio mode (Claude Desktop, Cursor, local IDEs):
+...
+Remote HTTP hosting (Docker Compose, VPS, n8n, Dify, cloud agents):
+docker run -d --name deepseek-mc…
+result=4 | DeepSeek API 已支持网页搜索和抓取- DoNews | https://www.donews.com/news/detail/1/6745095.html | DoNews | DeepSeek API 已支持网页搜索和抓取
+
+杨亮 2026-10-19 11:08:38
+...
+10月19日消息，DeepSeek 18 日发布公告，DeepSeek API 现已支持网页搜索与抓取，按请求次数计费，单价为每 1000 次成功请求 5 元。
+
+公告称，当前用户在 DeepSeek Harness / Claude Code / Codex 中使用 DeepSeek API 时，已经会通过 Server 端工具调用访问到 Search / Fetch 接…
+result=5 | 千次5元、搜不到不收钱：DeepSeek给Agent装上自研搜索，价格只有Tavily的零头-钛媒体官方网站 | https://m.tmtpost.com/8173434.html | 钛媒体网 | 千次5元、搜不到不收钱：DeepSeek给Agent装上自研搜索，价格只有Tavily的零头
+
+2026.10.19 18:57来自北京27.2万阅读
+...
+搜索按次收费，失败不收钱。
+...
+导读： DeepSeek公告Search/Fetch API定价：每1000次成功请求5元（约0.75美元），失败、无结果、超时均不计费，11月1日起正式收费。两个接口由DeepSeek自研搜索引擎驱动，此前在Harness、Claude Code、Codex中一直免费。横向看，这个…

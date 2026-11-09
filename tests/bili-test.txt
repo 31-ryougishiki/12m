@@ -1,0 +1,12 @@
+﻿PASS
+query=独立游戏 开发
+videos=4
+video=1 | BV1HV4x6CEti | 【免费开玩动物城！】我大概变成一名成熟的独立游戏开发者了？ | 啵啵奇遇动物城 | 1262
+video=2 | BV1ix4x6vE3C | 5000 万播放的创意，被 AI 抄成十几款游戏：独立游戏开发者还有活路吗？ | Gaby学姐说 | 1.5万
+video=3 | BV1bcWE6ZETJ | Game Oracle|我分析了62,000位独立开发者：真正决定成功的因素——I Analysed 62,000 Indie Developers | 庸才的朽木 | 608
+video=4 | BV1hGW76hE2v | 个人做的独立游戏《破阵》开发日志 | 吴山老祖 | 1908
+selected=BV1HV4x6CEti | 【免费开玩动物城！】我大概变成一名成熟的独立游戏开发者了？ | aid=117578739488238 | cid=43425730420
+comments=3
+comment=1 | 苦瓜XD | 不错，有《我在7年后等你》的感觉 | 1
+comment=2 | 怀旧游戏小东 | 前排前排 | 0
+comment=3 | 小猫彩璃的lanbao | [加油]加油加油，早日上线~ | 0

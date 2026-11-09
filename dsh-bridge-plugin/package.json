@@ -1,0 +1,25 @@
+{
+  "name": "dsh-elyms-bridge",
+  "version": "0.1.0",
+  "description": "Loopback workbench bridge that lets the Elyms desktop pet delegate real tasks to DSH agents.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.2.1-rc.3"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT"
+}

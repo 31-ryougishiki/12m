@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using System.Runtime.Serialization;
-using System.Runtime.Serialization.Json;
 
 namespace ElymsPet {
  [DataContract] public sealed class PetState {
@@ -27,13 +26,28 @@ namespace ElymsPet {
   [DataMember] public string ApiBase = "https://api.deepseek.com";
   [DataMember] public string ApiModel = "deepseek-flash";
   [DataMember] public bool AiChat = true;
-  [DataMember] public bool AiThinking = false;
-  [DataMember] public int Schema = 2;
+  [DataMember] public bool AiThinking = true;
+  [DataMember] public double ChatBarX = -99999;
+  [DataMember] public double ChatBarY = -99999;
+  [DataMember] public bool ChatBarHistory = true;
+  [DataMember] public bool ChatBarAutoHide = false;
+  [DataMember] public bool DshEnabled = true;
+  [DataMember] public bool DshAutoRun = false;
+  [DataMember] public bool DshFullAccess = false;
+  [DataMember] public bool WebEnabled = true;
+  [DataMember] public bool WebNeedContent = true;
+  [DataMember] public bool AutoLife = true;
+  [DataMember] public int AutoLifeMinutes = 30;
+  [DataMember] public bool AutoLifeDsh = false;
+  [DataMember] public bool MemoryEnabled = true;
+  [DataMember] public int Schema = 8;
   public void Normalize() {
    Scale = double.IsNaN(Scale) || double.IsInfinity(Scale) ? 1 : Math.Max(.65, Math.Min(1.6, Scale));
    Energy = double.IsNaN(Energy) ? 90 : Math.Max(0, Math.Min(100, Energy));
    if (double.IsNaN(X) || double.IsInfinity(X)) X = -99999;
    if (double.IsNaN(Y) || double.IsInfinity(Y)) Y = -99999;
+   if (double.IsNaN(ChatBarX) || double.IsInfinity(ChatBarX)) ChatBarX = -99999;
+   if (double.IsNaN(ChatBarY) || double.IsInfinity(ChatBarY)) ChatBarY = -99999;
    Note = Note ?? ""; FocusKind = FocusKind ?? "专注";
    FocusMinutes = Math.Max(1, Math.Min(180, FocusMinutes));
    PausedSeconds = Math.Max(0, Math.Min(10800, PausedSeconds));
@@ -46,6 +60,13 @@ namespace ElymsPet {
    ApiModel = ApiModel.Trim();
    if (ApiModel.Length > 80) ApiModel = ApiModel.Substring(0, 80);
    if (Schema < 2) { Schema = 2; AiChat = true; }
+   if (Schema < 3) { Schema = 3; ChatBarX = -99999; ChatBarY = -99999; ChatBarHistory = true; ChatBarAutoHide = false; }
+   if (Schema < 4) { Schema = 4; DshEnabled = true; DshAutoRun = false; DshFullAccess = false; }
+   if (Schema < 5) { Schema = 5; WebEnabled = true; WebNeedContent = true; }
+   if (Schema < 6) { Schema = 6; AiThinking = true; }
+   if (Schema < 7) { Schema = 7; AutoLife = true; AutoLifeMinutes = 30; AutoLifeDsh = false; }
+   if (Schema < 8) { Schema = 8; MemoryEnabled = true; }
+   AutoLifeMinutes = Math.Max(10, Math.Min(120, AutoLifeMinutes));
   }
   public double Remaining(DateTime now) { return FocusEnd == DateTime.MinValue ? PausedSeconds : Math.Max(0,(FocusEnd-now).TotalSeconds); }
   public void StartFocus(int minutes, string kind, DateTime now) { FocusMinutes = Math.Max(1, Math.Min(180, minutes)); FocusKind = kind; PausedSeconds = 0; FocusEnd = now.AddMinutes(FocusMinutes); }
@@ -61,20 +82,14 @@ namespace ElymsPet {
   public static string FilePath { get { return Path.Combine(Folder,"settings.json"); } }
   public static string LastError = "";
   public static PetState Load() {
-   foreach(string path in new[]{FilePath,FilePath+".bak"}) {
-    if(!File.Exists(path)) continue;
-    try { using(var s=File.OpenRead(path)) { var v=(PetState)new DataContractJsonSerializer(typeof(PetState)).ReadObject(s); if(v!=null) { v.Normalize(); return v; } } }
-    catch(Exception e) { LastError=e.Message; }
-   }
-   return new PetState();
+   PetState value=JsonFile.Load<PetState>(FilePath,out LastError);
+   if(value==null) return new PetState();
+   value.Normalize();
+   return value;
   }
   public static bool Save(PetState state) {
-   try {
-    Directory.CreateDirectory(Folder); state.Normalize(); string temp=FilePath+".tmp";
-    using(var s=File.Create(temp)) new DataContractJsonSerializer(typeof(PetState)).WriteObject(s,state);
-    if(File.Exists(FilePath)) File.Replace(temp,FilePath,FilePath+".bak"); else File.Move(temp,FilePath);
-    LastError=""; return true;
-   } catch(Exception e) { LastError=e.Message; return false; }
+   state.Normalize();
+   return JsonFile.Save(FilePath,state,Folder,out LastError);
   }
   public static void ForgetBackups() {
    string[] paths=new string[]{FilePath+".bak",FilePath+".tmp"};

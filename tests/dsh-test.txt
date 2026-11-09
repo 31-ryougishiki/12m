@@ -1,0 +1,10 @@
+﻿PASS
+health=ok
+workspace=D:\code\12m
+job=71ab3d6e-4516-4ae7-a516-672404a58d28
+status=done
+session=25418c49-5f3d-4e34-8f01-02f0e0d170c5
+tools=0
+seconds=1.0
+reply=接通
+error=

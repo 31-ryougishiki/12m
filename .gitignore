@@ -7,9 +7,29 @@ bin/
 obj/
 *.user
 *.suo
+dist/ElymsPet-test.exe
+tests/ElymsPet-bench.exe
 
 # 本机 API 密钥与私人设置，不要提交
 api-key.txt
 **/api-key.txt
 settings.json
 settings.json.bak
+
+# 第三方项目克隆（研究参考，~150 MB，自带 .git，见 research/OpenBiliClaw参考说明.md）
+research/open-source/
+
+# 历史版本便携包：仓库只保留 README 引用的最新包，旧版本见提交历史或 Releases
+ElymsPet-v*.zip
+!ElymsPet-v1.9-Windows.zip
+
+# vendor 里只保留构建需要的那份 QRCoder 组件（其余是解包 nupkg 的副本与元数据）
+*.nupkg
+vendor/qrcoder/QrTest.*
+vendor/qrcoder/qr-test.png
+vendor/qrcoder/nuget-icon.png
+vendor/qrcoder/.signature.p7s
+vendor/qrcoder/\[Content_Types\].xml
+vendor/qrcoder/_rels/
+vendor/qrcoder/lib/
+vendor/qrcoder/package/

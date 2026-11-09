@@ -9,11 +9,13 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using System.Windows.Interop;
+using Path=System.Windows.Shapes.Path;
 using Forms = System.Windows.Forms;
 
 namespace ElymsPet {
  public sealed class Sprite : FrameworkElement {
   public BitmapSource[] Frames;
+  public BitmapSource Face;
   byte[][] alpha;
   int fw,fh;
   public int Frame;
@@ -26,6 +28,8 @@ namespace ElymsPet {
     for(int i=0;i<9;i++) { var c=new CroppedBitmap(bitmap,new Int32Rect((i%3)*fw,(i/3)*fh,fw,fh)); c.Freeze(); Frames[i]=c;
      var bgra=new FormatConvertedBitmap(c,PixelFormats.Bgra32,null,0); alpha[i]=new byte[fw*fh*4]; bgra.CopyPixels(alpha[i],fw*4,0);
     }
+    int faceW=(int)(fw*.62),faceH=(int)(fh*.62);
+    Face=new CroppedBitmap(bitmap,new Int32Rect((int)(fw*.19),(int)(fh*.05),faceW,faceH)); Face.Freeze();
    }
    Cursor=Cursors.Hand;
   }
@@ -47,10 +51,18 @@ namespace ElymsPet {
   public readonly PetState State;
   public Sprite Art;
   public ControlWindow Panel;
-  public readonly ChatSession Chat=new ChatSession();
+  public string ProfileDigest="";
   public bool AiBusy;
+  public ChatBarWindow Bar;
+  public readonly DshWorkbench Dsh;
+  public readonly BiliService Bili;
+  public readonly ChatService Conversation;
+  public readonly AutonomyService Autonomy;
+  public readonly ArchiveService Archive;
+  public readonly MemoryService Memory;
   readonly Canvas canvas=new Canvas();
   readonly Border bubble=new Border();
+  readonly Path bubbleTail=new Path();
   readonly TextBlock bubbleText=new TextBlock();
   readonly Border badge=new Border();
   readonly TextBlock badgeText=new TextBlock();
@@ -79,28 +91,34 @@ namespace ElymsPet {
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h,out NativeRect rect);
   [StructLayout(LayoutKind.Sequential)] struct NativeRect {public int Left,Top,Right,Bottom;}
   public PetWindow(PetState state,bool preview) {
-   State=state; IsPreview=preview; Title="曳尔沐 · 桌面来电"; WindowStyle=WindowStyle.None; ResizeMode=ResizeMode.NoResize;
+   BiliAuth.Load();
+   State=state; Dsh=new DshWorkbench(this); Bili=new BiliService(this); Conversation=new ChatService(this); Autonomy=new AutonomyService(this); IsPreview=preview; Archive=new ArchiveService(this); Memory=new MemoryService(this); Title="曳尔沐 · 桌面来电"; WindowStyle=WindowStyle.None; ResizeMode=ResizeMode.NoResize;
    AllowsTransparency=true; Background=Brushes.Transparent; ShowInTaskbar=false; ShowActivated=false; Topmost=state.Topmost;
    Content=canvas; Art=new Sprite(); canvas.Children.Add(Art);
-   bubble.Background=ControlWindow.Brush("#F4F2FF"); bubble.BorderBrush=ControlWindow.Brush("#A9B7F5"); bubble.BorderThickness=new Thickness(1); bubble.CornerRadius=new CornerRadius(18,18,18,4); bubble.Padding=new Thickness(14,10,14,10);
-   bubbleText.FontFamily=new FontFamily("Microsoft YaHei UI"); bubbleText.FontSize=12; bubbleText.LineHeight=21; bubbleText.TextWrapping=TextWrapping.Wrap; bubbleText.Foreground=ControlWindow.Brush("#293456"); bubble.Child=bubbleText; bubble.Visibility=Visibility.Collapsed; canvas.Children.Add(bubble);
+   bubbleTail.Data=Geometry.Parse("M0,0 L13,0 L6.5,9 Z"); bubbleTail.Fill=Theme.Brush("#F9F7FF"); bubbleTail.Stroke=Theme.Brush("#C3CCF8"); bubbleTail.StrokeThickness=1; bubbleTail.Visibility=Visibility.Collapsed; bubbleTail.IsHitTestVisible=false; canvas.Children.Add(bubbleTail);
+   bubble.Background=Theme.Grad("#FCFBFF","#F1EEFF",90); bubble.BorderBrush=Theme.Brush("#C3CCF8"); bubble.BorderThickness=new Thickness(1); bubble.CornerRadius=new CornerRadius(18,18,18,6); bubble.Padding=new Thickness(15,11,15,11);
+   bubbleText.FontFamily=Theme.Font; bubbleText.FontSize=12.5; bubbleText.LineHeight=22; bubbleText.TextWrapping=TextWrapping.Wrap; bubbleText.Foreground=Theme.Brush("#26324F"); bubble.Child=bubbleText; bubble.Visibility=Visibility.Collapsed; canvas.Children.Add(bubble);
    badge.Background=ControlWindow.Brush("#DF18263F"); badge.CornerRadius=new CornerRadius(13); badge.Padding=new Thickness(12,5,12,5);
-   badgeText.FontFamily=new FontFamily("Microsoft YaHei UI"); badgeText.FontSize=11; badgeText.Foreground=ControlWindow.Brush("#C4F5EE"); badge.Child=badgeText; badge.Cursor=Cursors.Hand; badge.MouseLeftButtonUp+=delegate { OpenPanel(); }; canvas.Children.Add(badge);
+   badgeText.FontFamily=new FontFamily("Microsoft YaHei UI"); badgeText.FontSize=11; badgeText.Foreground=ControlWindow.Brush("#C4F5EE"); badge.Child=badgeText; badge.Cursor=Cursors.Hand; badge.MouseLeftButtonUp+=delegate { OpenPanel(); }; badge.ToolTip="双击打开陪伴面板 · Ctrl + Alt + Q 浮动输入框"; canvas.Children.Add(badge);
    badgeText.Text="●  曳尔沐 · 信号满格";
    Art.MouseLeftButtonDown+=OnDown; Art.MouseMove+=OnMove; Art.MouseLeftButtonUp+=OnUp;
    Art.LostMouseCapture+=delegate { pressed=false; dragging=false; };
    MouseWheel+=delegate(object o,MouseWheelEventArgs e) { ResizePet(State.Scale+(e.Delta>0?.08:-.08)); e.Handled=true; };
    MouseRightButtonUp+=delegate(object o,MouseButtonEventArgs e) { var menu=BuildMenu(); menu.PlacementTarget=this; menu.IsOpen=true; e.Handled=true; };
    SourceInitialized+=delegate { handle=new WindowInteropHelper(this).Handle; SetWindowLong(handle,GWL_EXSTYLE,GetWindowLong(handle,GWL_EXSTYLE)|WS_EX_TOOLWINDOW);
-    HwndSource.FromHwnd(handle).AddHook(Hook); if(!preview) HotkeyAvailable=RegisterHotKey(handle,1,0x4000|2|1,0x45); };
+    HwndSource.FromHwnd(handle).AddHook(Hook);
+    if(!preview) { HotkeyAvailable=RegisterHotKey(handle,1,0x4000|2|1,0x45); ChatHotkeyAvailable=RegisterHotKey(handle,2,0x4000|2|1,0x51); } };
    Loaded+=delegate { ResizePet(State.Scale); if(State.X > -90000) { Left=State.X;Top=State.Y;Clamp(); } else Home();
-    if(!preview) { InitTray(); timer.Start(); Say(State.Sleeping?"睡眠频道已开启。明天再连接。":"曳尔沐已连接。拖动我挪位置，右键看看有什么好玩的。",8); }
+    if(!preview) { InitTray(); timer.Start(); Say(State.Sleeping?"睡眠频道已开启。明天再连接。":"曳尔沐已连接。按 Ctrl + Alt + Q，随时和我说句话。",10); }
    };
    timer.Interval=TimeSpan.FromMilliseconds(40); timer.Tick+=Tick;
-   Closing+=delegate { if(closing) return; closing=true; Save(); timer.Stop(); if(tray!=null) tray.Dispose(); if(handle!=IntPtr.Zero) UnregisterHotKey(handle,1); if(Panel!=null) Panel.Close(); };
+   Closing+=delegate { if(closing) return; closing=true; Save(); timer.Stop(); Dsh.Dispose(); Autonomy.Dispose(); if(tray!=null) tray.Dispose(); if(handle!=IntPtr.Zero) {UnregisterHotKey(handle,1);UnregisterHotKey(handle,2);} if(Bar!=null) {Bar.Close();Bar=null;} if(Panel!=null) Panel.Close(); };
   }
-  public bool HotkeyAvailable;
-  IntPtr Hook(IntPtr h,int msg,IntPtr w,IntPtr l,ref bool handled) { if(msg==0x312&&w.ToInt32()==1) { Recover(); handled=true; } return IntPtr.Zero; }
+  public bool HotkeyAvailable,ChatHotkeyAvailable;
+  IntPtr Hook(IntPtr h,int msg,IntPtr w,IntPtr l,ref bool handled) {
+   if(msg==0x312) {int id=w.ToInt32(); if(id==1) {Recover();handled=true;} else if(id==2) {ToggleChatBar();handled=true;}}
+   return IntPtr.Zero;
+  }
   public Rect WorkArea() {
    var c=Forms.Cursor.Position;
    var point=new System.Drawing.Point((int)((Left+Width/2)*Dpi), (int)((Top+Height/2)*Dpi));
@@ -116,6 +134,7 @@ namespace ElymsPet {
    Art.Width=300*s;Art.Height=300*s; Canvas.SetTop(Art,66*s);
    bubble.Width=240*s; Canvas.SetLeft(bubble,30*s); Canvas.SetTop(bubble,2*s);
    Canvas.SetTop(badge,Height-27); Canvas.SetLeft(badge,Width/2-72);
+   PlaceBubbleTail();
    if(IsLoaded) {if(!double.IsNaN(oldH)) Top+=oldH-Height;Clamp();} Save();
   }
   Point CursorPoint() { var p=Forms.Cursor.Position; return new Point(p.X/Dpi,p.Y/Dpi); }
@@ -136,14 +155,28 @@ namespace ElymsPet {
   public void Call() { State.Sleeping=false; Act(6,"桌面频道已接通。今天有什么想和我分享的吗？",6); }
   public void SleepToggle() { State.Sleeping=!State.Sleeping; forced=-1;walkUntil=0; Say(State.Sleeping?"晚安。把没做完的事留给明天，连接不会因此消失。":"睡眠缓存读取完毕。又见面啦。",6);Save(); }
   public void Act(int frame,string text,int seconds) { forced=frame;stateUntil=clock.Elapsed.TotalSeconds+seconds;Say(text,seconds); }
-  public void Say(string text,int seconds) { bubbleText.Text=text;bubbleUntil=DateTime.UtcNow.AddSeconds(seconds);bubble.Visibility=Visibility.Visible; }
+  public void Say(string text,int seconds) { bubbleText.Text=text;bubbleUntil=DateTime.UtcNow.AddSeconds(seconds);bubble.Visibility=Visibility.Visible;bubble.UpdateLayout();PlaceBubbleTail(); }
+  void PlaceBubbleTail() {
+   if(bubble.Visibility!=Visibility.Visible) {bubbleTail.Visibility=Visibility.Collapsed;return;}
+   double top=Canvas.GetTop(bubble);if(double.IsNaN(top))top=2*State.Scale;
+   double left=Canvas.GetLeft(bubble);if(double.IsNaN(left))left=30*State.Scale;
+   double width=double.IsNaN(bubble.Width)?240*State.Scale:bubble.Width;
+   double height=bubble.ActualHeight;
+   if(double.IsNaN(height)||height<=0)return;
+   double scale=Math.Max(.85,Math.Min(1.3,State.Scale));
+   bubbleTail.Visibility=Visibility.Visible;
+   bubbleTail.RenderTransform=new ScaleTransform(scale,scale);
+   Canvas.SetLeft(bubbleTail,left+width/2-6.5*scale);
+   Canvas.SetTop(bubbleTail,top+height-1);
+  }
   public void Save() { if(IsPreview) return; if(IsLoaded) {State.X=Left;State.Y=Top;} Storage.Save(State); }
   void Tick(object o,EventArgs e) {
    var now=DateTime.UtcNow;double t=clock.Elapsed.TotalSeconds,dt=Math.Min(.15,t-lastTick);lastTick=t;
    if(lastWindowCheck!=(int)t) {lastWindowCheck=(int)t;CheckForeground();}
    bool focus=State.FocusEnd!=DateTime.MinValue;
    if(State.CompleteIfDue(now)) { Act(4,State.FocusKind=="专注"?"这一段专注完成啦！离开屏幕，伸个懒腰吧。":"休息结束。准备好开启下一段了吗？",12); if(!State.Muted) System.Media.SystemSounds.Asterisk.Play();Save(); }
-   if(now>bubbleUntil) bubble.Visibility=Visibility.Collapsed;
+   if(now>bubbleUntil) {bubble.Visibility=Visibility.Collapsed;bubbleTail.Visibility=Visibility.Collapsed;}
+   PlaceBubbleTail();
    if(t>stateUntil) forced=-1;
    bool activeMove=!fullscreen&&!State.Sleeping&&!dragging&&!pressed&&!focus&&forced<0;
    if(activeMove&&follow) { var p=CursorPoint(); double delta=p.X-(Left+Width/2); if(Math.Abs(delta)>80) {direction=delta>0?1:-1; Left+=direction*65*dt;walkUntil=t+.2;Clamp();} }
@@ -165,7 +198,8 @@ namespace ElymsPet {
   public static string FormatTime(double seconds) { int n=Math.Max(0,(int)Math.Ceiling(seconds));return (n/60).ToString("00")+":"+(n%60).ToString("00"); }
   void CheckForeground() {
    fullscreen=false;var h=GetForegroundWindow();
-   if(h!=IntPtr.Zero&&h!=handle&&(Panel==null||h!=new WindowInteropHelper(Panel).Handle)) {
+   IntPtr barHandle=(Bar!=null&&Bar.IsVisible)?new WindowInteropHelper(Bar).Handle:IntPtr.Zero;
+   if(h!=IntPtr.Zero&&h!=handle&&(Panel==null||h!=new WindowInteropHelper(Panel).Handle)&&(barHandle==IntPtr.Zero||h!=barHandle)) {
     var c=new System.Text.StringBuilder(256);GetClassName(h,c,c.Capacity);string cls=c.ToString();
     if(cls!="WorkerW"&&cls!="Progman"&&cls!="Shell_TrayWnd") {
      NativeRect rect;var screen=Forms.Screen.FromHandle(h).Bounds;
@@ -186,13 +220,21 @@ namespace ElymsPet {
   }
   public void OpenPanel() {if(Panel==null) {Panel=new ControlWindow(this);Panel.Closed+=delegate {Panel=null;};} Panel.Show();Panel.Activate();}
   public void OpenPanel(int tab) {OpenPanel();if(Panel!=null)Panel.SelectTab(tab);}
+  public void OpenChatBar() {
+   if(Bar==null) {Bar=new ChatBarWindow(this);Bar.Closed+=delegate {Bar=null;};}
+   Bar.ShowBar();
+  }
+  public void ToggleChatBar() {
+   if(Bar!=null&&Bar.IsVisible&&Bar.IsActive) {Bar.HideBar();return;}
+   OpenChatBar();
+  }
   public void Recover() {SetPassThrough(false);Show();Home();Say("我在这里，已经重新连接啦。",5);}
   public void SetPassThrough(bool enabled) {passThrough=enabled;if(handle!=IntPtr.Zero) {int ex=GetWindowLong(handle,GWL_EXSTYLE);SetWindowLong(handle,GWL_EXSTYLE,enabled?ex|WS_EX_TRANSPARENT:ex&~WS_EX_TRANSPARENT);} }
   MenuItem Item(string title,Action a) { var item=new MenuItem {Header=title};item.Click+=delegate {a();};return item; }
   MenuItem Check(string title,bool value,Action<bool> set) {var item=new MenuItem{Header=title,IsCheckable=true,IsChecked=value};item.Click+=delegate {set(item.IsChecked);Save();};return item;}
   ContextMenu BuildMenu() {
    var m=new ContextMenu {FontFamily=new FontFamily("Microsoft YaHei UI"),FontSize=13};
-   m.Items.Add(Item("打开陪伴面板",OpenPanel));m.Items.Add(Item("和曳尔沐聊聊",delegate {OpenPanel(0);}));m.Items.Add(Item("摸摸头",Pet));m.Items.Add(Item("投喂数据零食",Feed));m.Items.Add(Item("接通来电",Call));m.Items.Add(Item(State.Sleeping?"唤醒曳尔沐":"晚安，休息一会儿",SleepToggle));m.Items.Add(new Separator());
+   m.Items.Add(Item("打开陪伴面板",OpenPanel));m.Items.Add(Item("浮动输入框（Ctrl + Alt + Q）",delegate {OpenChatBar();}));m.Items.Add(Item("和曳尔沐聊聊",delegate {OpenPanel(0);}));m.Items.Add(Item("存档单元",delegate {OpenPanel(1);}));m.Items.Add(Item("DSH 工作台",delegate {OpenPanel(2);}));m.Items.Add(Item("联网搜索",delegate {OpenPanel(3);}));m.Items.Add(Item("B站逛逛",delegate {OpenPanel(4);}));m.Items.Add(Item("让她自己安排",delegate {Autonomy.RunNow();}));m.Items.Add(Item("摸摸头",Pet));m.Items.Add(Item("投喂数据零食",Feed));m.Items.Add(Item("接通来电",Call));m.Items.Add(Item(State.Sleeping?"唤醒曳尔沐":"晚安，休息一会儿",SleepToggle));m.Items.Add(new Separator());
    m.Items.Add(Check("桌面散步",State.Wander,delegate(bool v) {State.Wander=v;follow=false;}));
    m.Items.Add(Check("跟随鼠标",follow,delegate(bool v) {follow=v;State.Wander=false;}));
    m.Items.Add(Check("始终置顶",State.Topmost,delegate(bool v) {State.Topmost=v;Topmost=v;}));
@@ -205,7 +247,13 @@ namespace ElymsPet {
    using(var s=Assembly.GetExecutingAssembly().GetManifestResourceStream("pet.ico")) {tray.Icon=new System.Drawing.Icon(s);}
    var m=new Forms.ContextMenuStrip();
    m.Items.Add("打开陪伴面板",null,delegate {Dispatcher.Invoke(new Action(OpenPanel));});
+   m.Items.Add("浮动输入框",null,delegate {Dispatcher.Invoke(new Action(OpenChatBar));});
    m.Items.Add("和曳尔沐聊聊",null,delegate {Dispatcher.Invoke(new Action(delegate {OpenPanel(0);}));});
+   m.Items.Add("存档单元",null,delegate {Dispatcher.Invoke(new Action(delegate {OpenPanel(1);}));});
+   m.Items.Add("DSH 工作台",null,delegate {Dispatcher.Invoke(new Action(delegate {OpenPanel(2);}));});
+    m.Items.Add("联网搜索",null,delegate {Dispatcher.Invoke(new Action(delegate {OpenPanel(3);}));});
+    m.Items.Add("B站逛逛",null,delegate {Dispatcher.Invoke(new Action(delegate {OpenPanel(4);}));});
+    m.Items.Add("让她自己安排",null,delegate {Dispatcher.Invoke(new Action(Autonomy.RunNow));});
    m.Items.Add("召回 / 解除鼠标穿透",null,delegate {Dispatcher.Invoke(new Action(Recover));});
    m.Items.Add("睡眠 / 唤醒",null,delegate {Dispatcher.Invoke(new Action(SleepToggle));});
    m.Items.Add("隐藏 / 显示",null,delegate {Dispatcher.Invoke(new Action(delegate {if(IsVisible) Hide();else Show();}));});

@@ -1,0 +1,18 @@
+﻿PASS
+model=deepseek-flash
+base=https://api.deepseek.com
+key=sk-…023e (来源：设置文件)
+seconds=1.26
+status=200
+tokens=633+154
+answer=我平时主要做 C# 和 WPF 桌面工具，最近在学 Python 数据分析，周末会弹吉他。
+structured=True
+reply={"reply":"C# 加 WPF 做桌面工具，那挺实在的。你最近做的那个工具是给谁用的，具体解决什么问题？","items":[{"title":"C# 与 WPF 桌面开发","domain":"桌面开发","level":"熟练","evidence":"我平时主要做 C# 和 WPF 桌面工具","note":""},{"title":"Python 数据分析","domain":"数据分析","level":"了解","evidence":"最近在学 Python 数据分析","note":"学习中"},{"title":"弹吉他","domain":"音乐","level":"会用","evidence":"周末会弹吉他","note":""}],"summary":"做 C#/WPF 桌面工具，正在学 Python 数据分析，周末弹吉他。"}
+summary=做 C#/WPF 桌面工具，正在学 Python 数据分析，周末弹吉他。
+added=3
+item=桌面开发 | C# 与 WPF 桌面开发 | 熟练 | 我平时主要做 C# 和 WPF 桌面工具
+item=数据分析 | Python 数据分析 | 了解 | 最近在学 Python 数据分析
+item=音乐 | 弹吉他 | 会用 | 周末会弹吉他
+persisted=3
+file=C:\Users\PC\AppData\Local\Temp\dsh-win-bash-21656-a85d531f\ElymsArchiveTest-76e8e3726e334b58ae2682bc9350f401\archives\archives.json
+error=

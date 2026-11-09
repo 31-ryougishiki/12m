@@ -1,0 +1,5 @@
+﻿PASS
+file=C:\Users\PC\AppData\Local\ElymsDesktopPet\archives\archives.json
+exists=True
+archive=我的存档
+items=0

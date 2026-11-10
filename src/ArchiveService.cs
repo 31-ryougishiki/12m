@@ -40,6 +40,7 @@ namespace ElymsPet {
   public string ResumeSummary {get {return ArchiveResearch.ResumeSummary(slot);}}
   public string ResearchStatus {get {return "整理与追问：深度思考已开启 · "+(state.WebEnabled?"联网查证已开启":"联网查证已关闭（可在设置中开启）");}}
   public string LatestSources {get {return HasPendingAsk()?slot.Turns[slot.Turns.Count-1].Sources??"":"";}}
+  public string LatestAssessment {get {return HasPendingAsk()?slot.Turns[slot.Turns.Count-1].Assessment??"":"";}}
   public int TurnRevision {get {return turnRevision;}}
   public int ProfileRevision {get {return profileRevision;}}
   public int SlotRevision {get {return slotRevision;}}
@@ -148,10 +149,12 @@ namespace ElymsPet {
    }
    if(outcome.Truncated){status="思考或追问输出未完整结束，请重试；当前访谈和已取回资料已保留。";Save();Raise();return;}
    string question=ArchiveInterview.CleanQuestion(outcome.Text);
-   if(question.Length==0) {status="这次没有生成有效的问题，再试一次。";Save();Raise();return;}
+   var assessment=ArchiveAssessment.Parse(outcome.Text);
+   if(question.Length==0||assessment==null) {status="这次没有生成完整的协助判断，点「恢复上次聊天」重试。";Save();Raise();return;}
    ArchiveStore.AddTurn(slot,"ask",question);
    slot.InterviewStage="";
    slot.Turns[slot.Turns.Count-1].Sources=sources;
+   slot.Turns[slot.Turns.Count-1].Assessment=assessment.Display();
    notice="";
    status="问题已发出 · "+(outcome.HasReasoning?"模型已返回思考结果":"已请求模型深度思考")+"。回答后继续整理。";
    Save();turnRevision++;Raise();
@@ -207,8 +210,9 @@ namespace ElymsPet {
    InterviewResult result=ArchiveInterview.Parse(outcome.Text);
    if(result.Structured) {
     string nextQuestion=ArchiveInterview.CleanQuestion(result.Reply);
-    bool asked=!state.WebEnabled&&!result.Pause&&nextQuestion.Length>0&&ArchiveInterview.LooksLikeQuestion(nextQuestion);
-    if(asked) ArchiveStore.AddTurn(slot,"ask",nextQuestion);
+    var assessment=ArchiveAssessment.Parse(outcome.Text);
+    bool asked=!state.WebEnabled&&!result.Pause&&assessment!=null&&nextQuestion.Length>0&&ArchiveInterview.LooksLikeQuestion(nextQuestion);
+    if(asked) {ArchiveStore.AddTurn(slot,"ask",nextQuestion);slot.Turns[slot.Turns.Count-1].Assessment=assessment.Display();}
     slot.InterviewStage=asked?"":"question";
     ArchiveKnowledge.Merge(slot,result);
     int added=ArchiveStore.Merge(slot,result.Items);
@@ -322,7 +326,7 @@ namespace ElymsPet {
    if(busy||slot==null)return;
    string goal=string.IsNullOrEmpty(slot.InterviewGoal)?slot.Focus:slot.InterviewGoal;
    slot.Paused=false;
-   ArchiveStore.AddTurn(slot,"answer","先跳过局部细节，回到工作主线："+(string.IsNullOrEmpty(goal)?"最近一项代表性工作的完整流程":goal)+"。请根据已有回答补一个主要阶段、验收或交付方面的缺口，不重复问已说明的步骤。");
+   ArchiveStore.AddTurn(slot,"answer","先跳过当前问题，回到工作主线："+(string.IsNullOrEmpty(goal)?"最近一项希望你协助的工作":goal)+"。请基于已有信息重新判断你现在能帮我做什么，还缺少哪个最关键的信息；不要重复问已说明的内容。");
    Save();turnRevision++;Raise();AskNext();
   }
   public bool ConfirmWorkflow(ArchiveWorkflow workflow) {

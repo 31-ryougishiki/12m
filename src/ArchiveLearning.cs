@@ -82,7 +82,7 @@ namespace ElymsPet {
    return e.Task+"（"+e.Outcome+" · "+e.Source+"）\n场景："+e.Situation+"\n做法与判断："+e.Decision+"\n经验："+e.Lesson+"\n原话："+e.Evidence;
   }
   public static string Context(ArchiveSlot slot) {
-   var text=new StringBuilder("\n从案例追问：先补齐工作主线，再补充同一主题尚未说明的场景、选择理由、结果、失败边界；每轮只补一个缺口，不重复已经回答的内容。失败案例用于修订流程草稿，不当成已掌握的证明。\n");
+   var text=new StringBuilder("\n从案例追问：根据协助任务的实际阻塞，选择同一主题尚未说明的场景、选择理由、结果、失败边界；每轮只补一个缺口，不重复已经回答的内容。失败案例用于修订流程草稿，不当成已掌握的证明。\n");
    int count=0;
    for(int i=slot.Episodes.Count-1;i>=0&&count<4;i--) {
     var e=slot.Episodes[i];

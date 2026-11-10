@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -24,6 +24,7 @@ namespace ElymsPet {
   [DataMember] public string Text = "";
   [DataMember] public DateTime At = DateTime.MinValue;
   [DataMember] public string Sources = "";
+  [DataMember] public string Assessment = "";
  }
  [DataContract] public sealed class ArchiveSlot {
   [DataMember] public string Id = "";
@@ -138,6 +139,7 @@ namespace ElymsPet {
      string text=Clip(Clean(turn.Text),2000);if(text.Length==0) continue;
      var copy=new ArchiveTurn();copy.Role=turn.Role=="ask"?"ask":"answer";copy.Text=text;
      copy.Sources=Clip((turn.Sources??"").Trim(),3000);
+     copy.Assessment=copy.Role=="ask"?Clip((turn.Assessment??"").Trim(),2000):"";
      copy.At=turn.At==DateTime.MinValue?DateTime.UtcNow:SafeUtc(turn.At);
      result.Add(copy);
     }
@@ -468,28 +470,24 @@ namespace ElymsPet {
  }
  // 访谈与整理用的提示词、JSON 解析。所有输出先经过 Sanitize，避免模型跑偏写坏存档。
  public static class ArchiveInterview {
-  public const string SchemaHint = "输出格式：只输出一个 JSON 对象，不要 Markdown 代码块，不要多余文字：{\"reply\":\"先回应对方，再问下一个问题（只问一个）\",\"items\":[{\"title\":\"知识点或技能，不超过 20 字\",\"domain\":\"领域，不超过 8 字\",\"level\":\"了解|会用|熟练|专长\",\"evidence\":\"对方原话里的依据，不超过 60 字\",\"note\":\"你的补充，可为空\"}],\"summary\":\"用一句话概括目前画像，没有新增可留空\"}";
-  public const string Understanding = "访谈的价值是今后能协助完成整项工作，不是考察零散知识。先建立从接到任务到交付的流程骨架，再追问对结果有影响的决策。每次只问一个问题；用自然语言承接，但不要机械追着上一句的参数、算子名、版本号问。对同一局部最多连续追问两轮，随后回到未覆盖的工作阶段；用户明确要求深入或细节确实阻碍关键决策时才例外。用户说不熟悉、照用配置、未验证时记录边界并前进，不换个说法反复考问。";
+  public const string SchemaHint = "输出格式：只输出一个 JSON 对象，不要 Markdown 代码块，不要多余文字：{\"reply\":\"依据 assessment 追问关键缺口或提议最小试做\",\"items\":[{\"title\":\"知识点或技能，不超过 20 字\",\"domain\":\"领域，不超过 8 字\",\"level\":\"了解|会用|熟练|专长\",\"evidence\":\"对方原话里的依据，不超过 60 字\",\"note\":\"你的补充，可为空\"}],\"summary\":\"用一句话概括目前画像，没有新增可留空\"}";
+  public const string Understanding = "访谈的价值是今后能协助完成整项工作。每轮都思考：如果现在接手这个具体任务，我能基于已有信息可靠地做出什么，还会在哪个决策、操作或验证环节卡住？追问深度由这个实际阻塞决定，不由轮数决定。宏观流程和技术细节都只是候选信息；关键参数、代码路径、判据若会改变方案，就继续深入到可操作、可验证的程度。若已有信息足够，先提出有边界的最小试做并核对结果，不为凑齐表格而继续问。";
   public static string Agenda(ArchiveSlot slot) {
-   var text=new StringBuilder("\n本轮选题策略：按对后续协助完成工作的价值排序；优先补工作主线缺口，不按最后出现的技术名词选题。已回答的内容只简短复述，不重复询问。每次只选一个缺口，不把下列维度一次全部问出。\n");
+   var text=new StringBuilder("\n协助可行性评估：用已有信息尝试构建完成当前任务的具体方案，检查方案中的假设、缺失输入、决策依据和验证方式；只把简短结论写入 assessment，不展示推理过程。不要把能复述流程骨架误当作能解决实际工作，也不要把缺少某个字段自动当作关键缺口。\n");
+   text.Append("先界定用户当前要的交付物与范围，再判断信息是否足够。区分真正阻塞当前交付的必要信息和仅能进一步完善的可选信息：可明确标注待定、列为假设或留给试做验证，且不影响当前交付正确性的内容，不得当作先决问题。用户只要草稿/清单/对已有内容做整理时，不要擅自扩大成真实执行、上线或证明效果；已有信息能完成这个有边界的交付物，就选择 try。\n");
+   text.Append("优先选择会改变下一步做法、影响正确性或验收结果的缺口，一次只问一个问题。已给过答案先复用；答案含糊且真正阻塞工作时才换成具体案例、输入输出或判定条件继续深入。没有连续追问轮数上限，不强制按轮次切回宏观。用户明确跳过时尊重其选择；用户不熟悉时记录边界，调整协助方式而非反复考问。\n");
+   text.Append("区分信息来源：用户独有的实际约束、经验取舍、内部环境向用户问；公开原理和文档应自行查证，不让用户替你补通用知识。自身工具权限或无法验证的事实要明确标注，不能伪装成用户知识不足。尚未提及不等于不会，外部资料不能证明用户掌握。\n");
    if(slot==null)return text.ToString();
    string goal=string.IsNullOrEmpty(slot.InterviewGoal)?slot.Focus:slot.InterviewGoal;
-   text.Append("稳定工作主线：").Append(string.IsNullOrEmpty(goal)?"尚未确定，先选一项最近的代表性工作":goal).Append("\n已有背景摘要：").Append(slot.Summary).Append("\n");
-   int asks=0;foreach(var turn in slot.Turns)if(turn.Role=="ask")asks++;
-   if(asks>0&&asks%3==0)text.Append("本轮是主线回顾轮：必须回到尚未覆盖的阶段、阶段交接或交付标准，不继续追同一参数或假设故障。若主线已完整，核对流程草稿中一个关键不确定点。\n");
-   ArchiveWorkflow selected=null;double best=0;
-   foreach(var workflow in slot.Workflows) {double score=ArchiveRecall.Score(goal??"",workflow.Title+" "+workflow.Trigger);if(score>best){best=score;selected=workflow;}}
-   if(selected==null)text.Append("当前主线尚无匹配流程草稿：优先从真实案例补齐主要阶段，不重复用户刚给出的顺序。已有阶段顺序则问任务目标、验收或交付中最重要的一个未知点。不要为问细节而问细节。\n");
-   else {
-    text.Append("当前主线相关流程：").Append(selected.Title).Append("；优先核实缺口（须先检查近期回答，空字段不等于用户不会）：");
-    if(string.IsNullOrWhiteSpace(selected.Trigger))text.Append("任务目标与触发；");
-    if(string.IsNullOrWhiteSpace(selected.Preconditions))text.Append("输入与前置约束；");
-    if(string.IsNullOrWhiteSpace(selected.Steps))text.Append("主要阶段与先后顺序；");
-    if(string.IsNullOrWhiteSpace(selected.Checks))text.Append("结果验收与交付标准；");
-    if(string.IsNullOrWhiteSpace(selected.Exceptions))text.Append("关键异常与回退；");
-    text.Append("再核实阶段交接、交付物和协作职责；草稿完整时先请用户审阅，勿无限追加细节。\n");
-   }
-   text.Append("例如用户已说『先看代码，再 profiling，最后基准测试』，应整理为流程，再问验收标准或如何交付结论；不要立刻围绕某个融合算子连问多轮。外部查证只帮助理解当前阶段，不因网页出现新术语转移工作主线。\n");
+   text.Append("稳定工作主线：").Append(string.IsNullOrEmpty(goal)?"尚未确定，先明确一项用户希望你协助的具体任务":goal).Append("\n已有背景摘要：").Append(slot.Summary).Append("\n");
+   var items=new List<ArchiveItem>(slot.Items);
+   string query=(goal??"")+" "+slot.Focus;
+   for(int i=Math.Max(0,slot.Turns.Count-4);i<slot.Turns.Count;i++)if(slot.Turns[i].Role=="answer")query+=" "+slot.Turns[i].Text;
+   items.Sort(delegate(ArchiveItem x,ArchiveItem y) {return ArchiveRecall.Score(query,y.Title+" "+y.Domain+" "+y.Note).CompareTo(ArchiveRecall.Score(query,x.Title+" "+x.Domain+" "+x.Note));});
+   text.Append("相关已存知识及原话依据（历史自述，需结合最新纠正；不是已验证能力）：\n");
+   int count=0;foreach(var item in items) {if(count++>=12)break;text.Append(ArchiveStore.Clip(ArchiveLearning.ItemText(item),350)).Append("\n");}
+   if(items.Count>12)text.Append("另有未展开条目，当前上下文不是完整知识库；不要据此断言用户没有其他知识。\n");
+   text.Append("接下来结合流程草稿、已确认流程、真实案例、知识关系和最近回答重新判断；流程已确认仅代表用户核实过记录，不证明你已经具备工具权限或实际执行成功。\n");
    return text.ToString();
   }
   public static string BuildSystem(ArchiveSlot slot) {
@@ -497,14 +495,14 @@ namespace ElymsPet {
    text.Append(CharacterPersona.Prompt);
    text.Append("当前任务：存档访谈。用对话了解对方目前掌握的知识，整理成条目存进他的个人画像。用户拒绝追问时不再提问，items 保持空数组。\n");
    text.Append("说话方式：简体中文，自然口语，一到两句话，四十到八十字；不用 Markdown、列表、代码块，不写舞台说明，不堆颜文字。\n");
-   text.Append("你不是在做问卷，而是像聊天时忽然想更了解对方一样，主动把话题接过来。\n");
+   text.Append("依据协助可行性评估主动选择下一步，不以访谈必须继续为前提。\n");
    text.Append(Understanding).Append("\n").Append(ArchiveKnowledge.InterviewRules(slot));
    text.Append("访谈规则：\n1. 一次只问一个具体问题，能从对方上一句自然接下去；不要一次抛出多个问题，不要做成问卷。\n2. 先用一句话回应对方刚说的内容，再问下一个问题。\n3. 尽量覆盖这些方面：正在学什么、哪个领域有底气、常用工具或技能、做过什么完整的东西、学新东西的习惯、只是了解还没上手的方向。\n4. 对方说得模糊时，追问具体例子，不要替他补全，也不要夸大。\n5. 不要评价能力高低，不给学习计划，不替对方下人生结论。\n");
-   text.Append(SchemaHint).Append("\n").Append(ArchiveKnowledge.Schema).Append(ArchiveLearning.Schema).Append(KnowledgeGraph.Schema);
+   text.Append(SchemaHint).Append(ArchiveAssessment.Schema).Append("\n").Append(ArchiveKnowledge.Schema).Append(ArchiveLearning.Schema).Append(KnowledgeGraph.Schema);
    text.Append("items 只收录对方这句话里明确说到的知识或技能及其知识边界；没有就输出空数组。不要编造对方没说的内容。提问者介绍的论文、源码原理和资料索引都不是用户能力证据；不能把提问中的事实当作用户已掌握。没有明确说独立完成、已经发布、解决了某问题，就不要补上这些成果；遇到问题不等于已经掌握解决方法。\n");
    string digest=ArchiveStore.Digest(slot,20,500);
    text.Append("当前画像：").Append(digest.Length>0?digest:"（还是空的，需要从头问起。）").Append("\n");
-   text.Append("本轮必须只输出一个 JSON 对象：不要解释、不要 Markdown、不要代码块，第一个字符是 {，最后一个字符是 }。reply 里先回应对方，再问一个具体问题；如果用户已经拒绝访谈，就简短接受，不再追问，items 为空数组。\n");
+   text.Append("本轮必须只输出一个 JSON 对象：不要解释、不要 Markdown、不要代码块，第一个字符是 {，最后一个字符是 }。先形成 assessment，再由 reply 承接并追问关键缺口或提议最小试做；如果用户已经拒绝访谈，就简短接受，不再追问，items 为空数组。\n");
    return text.ToString();
   }
   public static ChatTurn[] BuildTurn(ArchiveSlot slot) {
@@ -515,7 +513,7 @@ namespace ElymsPet {
     for(int i=start;i<slot.Turns.Count;i++) list.Add(new ChatTurn(slot.Turns[i].Role=="ask"?"assistant":"user",slot.Turns[i].Text));
    }
    if(list.Count==1) list.Add(new ChatTurn("user","（还没有对话，请先提第一个问题。）"));
-   else list[list.Count-1]=new ChatTurn(list[list.Count-1].Role,list[list.Count-1].Content+"\n\n（只输出 JSON 对象，字段：reply、items、summary、focus、pause、resources、workflows、episodes、links。）");
+   else list[list.Count-1]=new ChatTurn(list[list.Count-1].Role,list[list.Count-1].Content+"\n\n（只输出 JSON 对象，字段：reply、assessment、items、summary、focus、pause、resources、workflows、episodes、links。）");
    return list.ToArray();
   }
   public static ChatTurn[] BuildQuestion(ArchiveSlot slot) {
@@ -525,19 +523,20 @@ namespace ElymsPet {
     int start=Math.Max(0,slot.Turns.Count-10);
     for(int i=start;i<slot.Turns.Count;i++) list.Add(new ChatTurn(slot.Turns[i].Role=="ask"?"assistant":"user",slot.Turns[i].Text));
    }
-   list.Add(new ChatTurn("user",list.Count==1?"（还没有对话）请主动问第一个问题。":"请主动问下一个问题。"));
+   list.Add(new ChatTurn("user",list.Count==1?"（还没有对话）先判断是否明确用户希望你协助的任务；如未明确，再问一个问题。":"先生成 assessment 判断能否协助当前任务，再生成 reply。信息足够时提议最小试做，不要为了继续访谈而编造必要问题。"));
    return list.ToArray();
   }
   public static string BuildQuestionSystem(ArchiveSlot slot) {
    var text=new StringBuilder();
    text.Append(CharacterPersona.Prompt);
-   text.Append("当前任务：存档访谈。主动了解用户已经掌握的知识、技能和工作方式。\n");
-   text.Append("这不是问卷，而是聊天里你忽然想更了解对方：你主动把话题接过来，先自然承接对方刚才说的内容，再问一个你真正好奇、且以后能帮上忙的问题。\n");
+   text.Append("当前任务：评估你能否基于已收集的信息协助用户完成具体工作，由评估结果决定是否需要继续访谈。\n");
+   text.Append("主动评估当前任务的可协助范围，用自然的对话承接。不要仅因为好奇就提问，也不要以访谈必须继续为前提；必要信息不足才追问，足够时提议最小试做。\n");
    text.Append(Understanding).Append("\n").Append(ArchiveKnowledge.InterviewRules(slot));
-   text.Append("只问一个具体问题；不要一次抛出多个问题，不要做成问卷；不要评价能力高低，不要给学习计划，不替对方下人生结论；不探隐私。\n");
+   text.Append("若需追问，只问一个具体问题；信息足够则提议试做，不继续搜集可选细节；不要评价能力高低，不要给学习计划，不替对方下人生结论；不探隐私。\n");
    text.Append("说话方式：简体中文，自然口语，一到两句话，四十到八十字；不用 Markdown、列表、代码块，不写舞台说明，不堆颜文字。\n");
-   text.Append("只输出你要说的那一两句话（可以有一句承接，然后一个问题）。不要输出「问题：」前缀、引号、JSON 或任何解释。\n");
-   text.Append("这一轮只负责提问，不要整理条目，也不要输出画像。\n");
+   text.Append("只输出 JSON 对象，包含 reply 和 assessment。reply 是面向用户的一两句话（追问一个必要缺口，或提议一个最小试做并请用户核对），不加「问题：」前缀。\n");
+   text.Append(ArchiveAssessment.Schema);
+   text.Append("这一轮只负责评估如何协助并选择追问或最小试做，不要整理知识条目，也不要输出画像。举例：用户已给出若干项目步骤，只希望整理成供审阅的草稿，未知负责人或操作细节可以标待定，此时选 try；用户希望你诊断一次真实失败，而缺少区分根因的关键证据，此时选 ask。不要为了完善未来的完整执行方案而阻塞眼前的小交付。\n");
    string digest=ArchiveStore.Digest(slot,20,500);
    text.Append("当前画像：").Append(digest.Length>0?digest:"（还是空的，需要从头问起。）").Append("\n");
    return text.ToString();

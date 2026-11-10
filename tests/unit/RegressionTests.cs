@@ -24,6 +24,7 @@ namespace ElymsPet {
     ArchiveLearningTests.Run(root);
     KnowledgeGraphTests.Run(root);
     ArchiveResearchTests.Run(root);
+    AssessmentTests.Run(root);
     ThinkingTests.Run();
     ShareAttachmentTests.Run(root);
     MemoryRoundTrip(root);

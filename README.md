@@ -20,7 +20,7 @@ Windows 同人桌宠，采用当前银白发副官造型，提供九种 Q 版姿
 
 ## 当前维护版本
 
-当前版本 **2.0.13**。存档知识整理、流程核实与深入追问默认开启高强度思考，并保护未完整输出的结果。详见 [存档联网、恢复与思考](docs/archive-online-resume.md)。此前的 [分享附件读取](docs/share-attachments.md) 继续保留。
+当前版本 **2.0.14**。存档知识整理、流程核实与深入追问默认开启高强度思考，并保护未完整输出的结果。详见 [存档联网、恢复与思考](docs/archive-online-resume.md)。此前的 [分享附件读取](docs/share-attachments.md) 继续保留。
 
 历史功能更新见 [更新记录](CHANGELOG.md)，代码结构与扩展约定见 [开发说明](docs/architecture.md)。
 

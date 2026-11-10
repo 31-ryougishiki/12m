@@ -69,7 +69,7 @@ namespace ElymsPet {
   sealed class ResearchApi:IArchiveApi {
    readonly WebOutcome result;int count;public string LastInput="";
    public ResearchApi(WebOutcome result){this.result=result;}
-   public ChatOutcome Complete(string key,string url,string model,bool thinking,ChatTurn[] turns,int timeout,int tokens,double temperature){LastInput=turns.Last().Content;return new ChatOutcome{Ok=true,Text=++count==1?"{\"mode\":\"read\",\"url\":\""+Share+"\"}":"你如何配置这两个节点？"};}
+   public ChatOutcome Complete(string key,string url,string model,bool thinking,ChatTurn[] turns,int timeout,int tokens,double temperature){LastInput=turns.Last().Content;return new ChatOutcome{Ok=true,Text=++count==1?"{\"mode\":\"read\",\"url\":\""+Share+"\"}":AssessmentTests.Question("你如何配置这两个节点？")};}
    public WebOutcome Search(string key,string url,string query){throw new Exception("Unexpected search");}
    public WebOutcome Fetch(string key,string url,string page){return result;}
   }

@@ -10,7 +10,7 @@ namespace ElymsPet {
   const string Paper="https://arxiv.org/abs/1234.5678";
   static readonly PetFeedback Feedback=new PetFeedback(delegate(int a,string b,int c){},delegate(string a,int b){},delegate{});
   static void Check(bool value,string name){if(!value)throw new Exception("Archive research: "+name);checks++;Console.WriteLine("PASS archive research: "+name);}
-  static ChatOutcome Ok(string text){return new ChatOutcome{Ok=true,Text=text};}
+  static ChatOutcome Ok(string text){return new ChatOutcome{Ok=true,Text=ArchiveInterview.LooksLikeQuestion(text)&&!text.TrimStart().StartsWith("{")?AssessmentTests.Question(text):text};}
   static PetState State(){return new PetState{AiChat=true,WebEnabled=true,ApiKey="sk-test-research-key"};}
   static ArchiveSlot Slot(){var s=ArchiveStore.NewSlot("模型结构");s.Focus="开源模型结构";ArchiveStore.AddTurn(s,"ask","你理解 GQA 的哪个部分？");ArchiveStore.AddTurn(s,"answer","我了解 GQA，但还没实现过。参考 "+Repo);return s;}
   static ArchiveResearchResult Run(Api api,PetState state,ArchiveSlot slot){return ArchiveResearch.Ask(api,state,state.ApiKey,ArchiveInterview.BuildQuestion(slot),ArchiveResearch.Context(slot),ArchiveResearch.ProvidedUrls(slot));}
@@ -119,8 +119,8 @@ namespace ElymsPet {
    slot.Workflows.Add(new ArchiveWorkflow{Title="模型部署与调优",Trigger="验证配置",Steps="看代码，再 profiling，最后基准测试"});
    ArchiveStore.AddTurn(slot,"ask","细节一？");ArchiveStore.AddTurn(slot,"answer","不确定");ArchiveStore.AddTurn(slot,"ask","细节二？");ArchiveStore.AddTurn(slot,"answer","还没验证");
    string agenda=ArchiveInterview.Agenda(slot);
-   Check(agenda.Contains("主线回顾轮")&&agenda.Contains("结果验收与交付标准")&&!agenda.Contains("任务目标与触发；"),"third-question checkpoint selects missing workflow coverage without asking known trigger");
-   Check(ArchiveInterview.BuildSystem(slot).Contains("主线回顾轮")&&ArchiveInterview.BuildQuestionSystem(slot).Contains("主线回顾轮"),"both offline-web and researched questions share mainline agenda");
+   Check(!agenda.Contains("主线回顾轮")&&agenda.Contains("改变下一步做法")&&agenda.Contains("没有连续追问轮数上限"),"task blockers replace fixed question-count checkpoints");
+   Check(ArchiveInterview.BuildSystem(slot).Contains("协助可行性评估")&&ArchiveInterview.BuildQuestionSystem(slot).Contains("协助可行性评估"),"both offline-web and researched questions assess ability to assist");
    var repository=new JsonRepository<ArchiveBook>(Path.Combine(root,"stage-recovery.json"));var book=ArchiveStore.Normalize(new ArchiveBook());slot=ArchiveStore.Active(book);ArchiveStore.AddTurn(slot,"ask","最近在做什么？");repository.Save(book);
    var scheduler=new Scheduler();api=new Api("{\"items\":[]}","{\"mode\":\"none\"}","","");
    var service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.Answer("做部署测试");scheduler.Drain();
@@ -128,7 +128,7 @@ namespace ElymsPet {
    int turns=service.Slot.Turns.Count;service.Dispose();
    api=new Api("{\"mode\":\"none\"}","这项任务的交付物是什么？");scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.ResumeInterview();scheduler.Drain();
    Check(service.HasQuestion&&api.Inputs.Count==2&&service.Slot.Turns.Count==turns+1&&service.Slot.InterviewStage=="","restart retries question without re-extracting or duplicating answer");
-   api.Responses.Enqueue(ChatOutcome.Fail("empty","",200,0));api.Responses.Enqueue(Ok("{\"items\":[],\"reply\":\"这项任务的输入是什么？\"}"));state.WebEnabled=false;
+   api.Responses.Enqueue(ChatOutcome.Fail("empty","",200,0));api.Responses.Enqueue(Ok("{\"items\":[],\"reply\":\"这项任务的输入是什么？\"}"));state.WebEnabled=false;api.Responses.Enqueue(Ok("这项任务的输入是什么？"));
    service.Answer("交付性能对比报告");scheduler.Drain();
    Check(service.HasQuestion&&service.LatestQuestion.Contains("输入")&&!service.Busy,"empty extraction recovers and automatically continues to next question");
    api.Responses.Enqueue(Ok("如何判断整个流程完成？"));service.BackToWorkflow();scheduler.Drain();

@@ -16,7 +16,7 @@ namespace ElymsPet {
   TextBox archiveName,interviewLog,interviewInput,focusInput,knowledgeSearch;
   StackPanel resourceList,workflowList,episodeList,changeList;
   TextBlock focusStatus;
-  TextBlock resumeSummary,researchStatus,researchSources;
+  TextBlock resumeSummary,researchStatus,researchSources,assistanceAssessment;
   Button resumeButton;
   TextBlock archiveStatus,archiveNote,extractStatus,profileSummary,profileStats,interviewQuestion;
   StackPanel profileList;
@@ -62,7 +62,7 @@ namespace ElymsPet {
     Ui.Row(Ui.Button("导出 Markdown",ExportArchive,false),Ui.Button("打开数据文件夹",delegate {Directory.CreateDirectory(ArchiveStore.Folder);Process.Start("explorer.exe",ArchiveStore.Folder);},false),Ui.Button("接口设置",delegate {selectTab(PanelTab.Settings);},false)),
     archiveStatus,archiveNote);
    tab.Children.Add(Ui.Text("工作知识库",22,"#4F3B43"));
-   tab.Children.Add(Ui.Text("先建立工作全貌，再一次聊透一个主题。随时纠正、跳过或暂停，下次接着聊。",12,"#78616A"));
+   tab.Children.Add(Ui.Text("围绕你希望完成的工作，判断她已经能帮什么、还缺什么。随时纠正、跳过或暂停。",12,"#78616A"));
    focusStatus=Ui.Text("",13,"#447969");tab.Children.Add(focusStatus);
    tab.Children.Add(pages);
    interviewLog=Ui.Input("",130);interviewLog.IsReadOnly=true;interviewLog.AcceptsReturn=true;interviewLog.VerticalScrollBarVisibility=ScrollBarVisibility.Auto;interviewLog.VerticalContentAlignment=VerticalAlignment.Top;interviewLog.FontSize=13;interviewLog.Margin=new Thickness(0,0,0,4);
@@ -80,14 +80,15 @@ namespace ElymsPet {
    inputRow.Children.Add(interviewInput);Grid.SetColumn(interviewInput,0);inputRow.Children.Add(interviewSend);Grid.SetColumn(interviewSend,1);interviewSend.VerticalAlignment=VerticalAlignment.Top;
    focusInput=Ui.Input("",36);focusInput.Width=260;focusInput.MaxLength=100;focusInput.ToolTip="例如：模型部署、需求评审、论文复现";
    resumeSummary=Ui.Text("",12,"#78616A");researchStatus=Ui.Text("",12,"#447969");researchSources=Ui.Text("",11,"#795F69");
+   assistanceAssessment=Ui.Text("",12,"#59434B");
    resumeButton=Ui.Button("恢复上次聊天",delegate {archive.ResumeInterview();interviewInput.Focus();},true);
    var talk=Ui.Stack(
     Ui.Text("逐层了解你的工作经验",18,"#4F3B43"),
     resumeSummary,Ui.Row(resumeButton),researchStatus,
-    Ui.Text("先梳理目标、主要阶段和交付，再深入关键决策。遇到空回复或临时错误会自动重试一次；仍失败可恢复当前阶段。",12,"#78616A"),
+    Ui.Text("按能否实际协助工作决定追问深度。必要时继续深挖；信息足够时，先提议小范围试做来验证理解。",12,"#78616A"),
     Ui.Text("本次想深入的主题（可选）",12,"#78616A"),
     Ui.Row(focusInput,Ui.Button("聚焦这个主题",delegate {if(!string.IsNullOrWhiteSpace(focusInput.Text))archive.Focus(focusInput.Text);},false)),
-    extractStatus,interviewQuestion,new Expander{Header="本轮查证状态与来源",Content=researchSources},inputRow,
+    extractStatus,interviewQuestion,new Expander{Header="她现在能帮什么 · 为什么问这个",Content=assistanceAssessment},new Expander{Header="本轮查证状态与来源",Content=researchSources},inputRow,
     Ui.Row(Ui.Button("这部分不熟悉",delegate {interviewInput.Text="这部分我还不熟悉，不能独立完成。";interviewInput.Focus();},false),Ui.Button("跳过这个问题",delegate {archive.Focus(archive.Slot.Focus.Length>0?archive.Slot.Focus:"换一个工作方面，先了解背景");},false),Ui.Button("暂停访谈",delegate {archive.Pause();},false)),
     Ui.Row(Ui.Button("回到工作主线",delegate {archive.BackToWorkflow();},false),interviewAsk,extractButton,Ui.Button("清空访谈记录",ClearInterview,false)),
     Ui.Text("提问和整理会向 API 发送近期访谈与背景。开启联网时按需检索公开技术资料并缓存来源，每轮最多一次搜索、两次网页读取；可能产生额外 API 费用。资料不等于你已掌握的知识。",11,"#795F69"),
@@ -188,6 +189,7 @@ namespace ElymsPet {
    if(interviewQuestion==null)return;
    if(resumeSummary!=null)resumeSummary.Text=archive.ResumeSummary;
    if(researchStatus!=null)researchStatus.Text=archive.ResearchStatus;
+   if(assistanceAssessment!=null)assistanceAssessment.Text=archive.LatestAssessment.Length>0?archive.LatestAssessment:"旧问题没有协助判断记录；回答后会根据当前信息评估下一步。判断仅供核对，不代表已经执行或验证。";
    if(researchSources!=null)researchSources.Text=archive.LatestSources.Length>0?archive.LatestSources:"这条问题没有联网查证记录；旧版本的问题会保留，回答后再按当前设置继续。";
    if(focusStatus!=null)focusStatus.Text=archive.Slot.Name+" · "+(archive.Slot.Paused?"已暂停 · ":"当前主题 · ")+(archive.Slot.Focus.Length==0?"建立工作背景":archive.Slot.Focus);
    string asked=archive.LatestQuestion;

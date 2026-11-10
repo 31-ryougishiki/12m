@@ -38,7 +38,7 @@ namespace ElymsPet {
   public bool HasQuestion {get {return HasPendingAsk();}}
   public bool CanAsk {get {return HasApi();}}
   public string ResumeSummary {get {return ArchiveResearch.ResumeSummary(slot);}}
-  public string ResearchStatus {get {return state.WebEnabled?"联网查证已开启 · 按需搜索 / 读取公开资料，来源存入资料库":"联网查证已关闭 · 可在设置 → AI 对话中开启";}}
+  public string ResearchStatus {get {return "整理与追问：深度思考已开启 · "+(state.WebEnabled?"联网查证已开启":"联网查证已关闭（可在设置中开启）");}}
   public string LatestSources {get {return HasPendingAsk()?slot.Turns[slot.Turns.Count-1].Sources??"":"";}}
   public int TurnRevision {get {return turnRevision;}}
   public int ProfileRevision {get {return profileRevision;}}
@@ -128,7 +128,7 @@ namespace ElymsPet {
    ChatTurn[] turns=ArchiveInterview.BuildQuestion(slot);
    PetState snapshot=state.Snapshot();
    string context=ArchiveResearch.Context(slot);var urls=ArchiveResearch.ProvidedUrls(slot);
-   busy=true;busyTitle=state.WebEnabled?"正在判断是否需要查证资料，并准备追问…":"正在想下一个问题…";status=busyTitle;notice="";
+   busy=true;busyTitle=state.WebEnabled?"正在查证资料并深入思考下一个问题…":"正在深入思考下一个问题…";status=busyTitle;notice="";
    Raise();
    work.Run(delegate {
     return ArchiveResearch.Ask(api,snapshot,key.Key,turns,context,urls);
@@ -145,12 +145,13 @@ namespace ElymsPet {
     status="出题没有成功："+(outcome==null?"没有接通。":outcome.Error);
     Save();Raise();return;
    }
+   if(outcome.Truncated){status="思考或追问输出未完整结束，请重试；当前访谈和已取回资料已保留。";Save();Raise();return;}
    string question=ArchiveInterview.CleanQuestion(outcome.Text);
    if(question.Length==0) {status="这次没有生成有效的问题，再试一次。";Save();Raise();return;}
    ArchiveStore.AddTurn(slot,"ask",question);
    slot.Turns[slot.Turns.Count-1].Sources=sources;
    notice="";
-   status="问题已发出。回答后由 DeepSeek 整理成条目。";
+   status="问题已发出 · "+(outcome.HasReasoning?"模型已返回思考结果":"已请求模型深度思考")+"。回答后继续整理。";
    Save();turnRevision++;Raise();
   }
   public bool Answer(string raw) {
@@ -170,11 +171,11 @@ namespace ElymsPet {
    if(!key.Configured) {OfflineInterview(text,"还没有配置 API Key，这次先离线记录。");return true;}
    ChatTurn[] turns=ArchiveInterview.BuildTurn(slot);
    string baseUrl=state.ApiBase,model=state.ApiModel;
-   busy=true;busyTitle="正在整理这条回答…";
+   busy=true;busyTitle="正在思考你的回答，核实知识边界与流程…";
    Save();Raise();
    feedback.Act(6,"正在整理这条知识，稍等一下…",20);
    work.Run(delegate {
-    return api.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.3);
+    return api.Complete(key.Key,baseUrl,model,true,turns,150,16384,0.3);
    },delegate(ChatOutcome outcome) {FinishInterview(outcome);});
    return true;
   }
@@ -186,9 +187,9 @@ namespace ElymsPet {
    ChatTurn[] turns=ArchiveInterview.BuildExtract(slot);
    if(resume)turns[0]=new ChatTurn("system",turns[0].Content+"\n用户刚刚明确点击了恢复上次聊天。沿用当前主题，忽略历史中的暂停请求，本次 pause=false；不要重置背景。");
    string baseUrl=state.ApiBase,model=state.ApiModel;
-   busy=true;busyTitle="正在重新整理最近的访谈…";status=busyTitle;notice="";Raise();
+   busy=true;busyTitle="正在深入思考并重新整理最近的访谈…";status=busyTitle;notice="";Raise();
    work.Run(delegate {
-    return api.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.2);
+    return api.Complete(key.Key,baseUrl,model,true,turns,150,16384,0.2);
    },delegate(ChatOutcome outcome) {FinishExtract(outcome,resume);});
   }
   void FinishInterview(ChatOutcome outcome) {
@@ -198,6 +199,7 @@ namespace ElymsPet {
     OfflineInterview(pendingAnswer,outcome==null?"这次没有接通。":"这次没有接通。"+outcome.Error);
     return;
    }
+   if(outcome.Truncated){OfflineInterview(pendingAnswer,"思考或整理输出未完整结束，未更新知识条目。");return;}
    InterviewResult result=ArchiveInterview.Parse(outcome.Text);
    if(result.Structured) {
     string nextQuestion=ArchiveInterview.CleanQuestion(result.Reply);
@@ -225,15 +227,16 @@ namespace ElymsPet {
    if(!key.Configured) {busy=false;busyTitle="";status="这轮没能整理成条目；接入 API 后可以重新整理。";Raise();return;}
    ChatTurn[] turns=ArchiveInterview.BuildExtract(slot);
    string baseUrl=state.ApiBase,model=state.ApiModel;
-   busy=true;busyTitle="正在单独整理条目…";Raise();
+   busy=true;busyTitle="正在深入思考并单独整理条目…";Raise();
    work.Run(delegate {
-    return api.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.2);
+    return api.Complete(key.Key,baseUrl,model,true,turns,150,16384,0.2);
    },delegate(ChatOutcome extract) {FinishExtract(extract);});
   }
   void FinishExtract(ChatOutcome outcome,bool resume=false) {
    busy=false;busyTitle="";
    if(slot==null) {Raise();return;}
    if(outcome==null||!outcome.Ok) {status="整理没有成功："+(outcome==null?"没有接通。":outcome.Error);Raise();return;}
+   if(outcome.Truncated){status="思考或整理输出未完整结束，原记录已保留，请重试整理。";Raise();return;}
    InterviewResult result=ArchiveInterview.Parse(outcome.Text);
    if(!result.Structured) {status="这批内容没能整理成条目，稍后再试一次。";Raise();return;}
    if(resume)result.Pause=false;

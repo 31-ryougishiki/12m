@@ -22,8 +22,10 @@ namespace ElymsPet {
     Check(ArchiveResearch.ProvidedUrls(slot).SequenceEqual(new[]{Repo}),"only actual user links enter read allowlist");
     var api=new Api("后续问题？");state.WebEnabled=false;var result=Run(api,state,slot);
     Check(api.Inputs.Count==1&&api.Searches==0&&api.Reads.Count==0&&result.Sources.Contains("关闭"),"network off skips planner and all web calls");
+    Check(api.Thinking.SequenceEqual(new[]{true})&&api.Tokens[0]==8192&&api.Timeouts[0]==150,"question still thinks with sufficient budget when web is off");
     state.WebEnabled=true;api=new Api("{\"mode\":\"none\"}","你在哪次工作中用过？");result=Run(api,state,slot);
     Check(api.Searches==0&&api.Reads.Count==0&&result.Resources.Count==0,"no lookup needed does not search");
+    Check(api.Thinking.SequenceEqual(new[]{false,true}),"lookup planner stays fast while followup thinks");
     api=new Api("{\"mode\":\"read\",\"url\":\""+Repo+"\"}","你了解 KV 共享的哪些限制？");result=Run(api,state,slot);
     Check(api.Reads.Count==1&&result.Resources.Count==1&&result.Resources[0].Kind=="代码仓"&&result.Resources[0].Retrieved>DateTime.MinValue,"user link read captures categorized content and timestamp");
     Check(result.Sources.Contains(Repo)&&api.Inputs.Last().Last().Content.Contains("EXTERNAL_SENTINEL"),"actual evidence and source reach question generator");
@@ -62,6 +64,7 @@ namespace ElymsPet {
    scheduler.Drain();
    Check(service.HasQuestion&&!service.Busy&&service.LatestQuestion.Contains("最不确定")&&!service.Slot.Turns.Any(t=>t.Text=="旧式追问？"),"web-enabled interview replaces unresearched followup with researched question");
    Check(api.Inputs.Count==3&&!string.Join("\n",api.Inputs[0].Select(t=>t.Content)).Contains("EXTERNAL_SENTINEL")&&service.Slot.Items.Count==1&&service.Slot.Items[0].Boundary=="正在学习","user ability extraction stays separate from external evidence");
+   Check(api.Thinking.SequenceEqual(new[]{true,false,true})&&api.Tokens[0]==16384&&api.Timeouts[0]==150,"answer extraction and followup both think with separate budgets");
    Check(service.Slot.Resources.Count==1&&service.LatestSources.Contains(Repo),"sources cached and associated with persisted question");
    string skill=File.ReadAllText(Path.Combine(ArchiveKnowledge.Folder(service.Slot),"SKILL.md"));Check(!skill.Contains("EXTERNAL_SENTINEL"),"web page is not exported as confirmed skill");
    string question=service.LatestQuestion;int count=service.Slot.Turns.Count;service.Dispose();
@@ -71,6 +74,7 @@ namespace ElymsPet {
    book=repository.Load();slot=ArchiveStore.Active(book);ArchiveStore.AddTurn(slot,"answer","先暂停，下次继续讲 GQA");slot.Paused=true;repository.Save(book);
    api=new Api("{\"items\":[],\"pause\":true}","{\"mode\":\"none\"}","接着 GQA，你如何理解共享 KV？");scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.ResumeInterview();scheduler.Drain();
    Check(!service.Slot.Paused&&service.HasQuestion&&api.Inputs[0][0].Content.Contains("用户刚刚明确点击"),"explicit resume overrides historic pause and continues same topic");service.Dispose();
+   Check(api.Thinking[0]&&api.Tokens[0]==16384,"resume extraction uses thinking mode");
    book=repository.Load();slot=ArchiveStore.Active(book);ArchiveStore.AddTurn(slot,"answer","回答已保存但接口出错");repository.Save(book);
    api=new Api();api.Responses.Enqueue(ChatOutcome.Fail("offline","",0,0));scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);int before=service.Slot.Turns.Count;service.ResumeInterview();scheduler.Drain();
    Check(!service.Busy&&!service.HasQuestion&&service.Slot.Turns.Count==before&&service.Status.Contains("没有成功"),"resume extraction failure preserves original last answer for retry");service.Dispose();
@@ -79,13 +83,21 @@ namespace ElymsPet {
    state.AiChat=false;api=new Api();scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.ResumeInterview();Check(scheduler.Work.Count==0&&service.Slot.Turns.Count==before,"AI-off resume retains history without network");service.Dispose();
    book=repository.Load();slot=ArchiveStore.Active(book);for(int i=0;i<80;i++)ArchiveStore.AddTurn(slot,"answer","历史 "+i);repository.Save(book);
    Check(ArchiveStore.Active(repository.Load()).Turns.Count>60,"new version retains more than legacy sixty messages");
+   api=new Api("{\"items\":[{\"title\":\"未完整知识\",\"domain\":\"测试\"}]}");api.Responses.Peek().Truncated=true;state.AiChat=true;scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);int oldItems=service.Slot.Items.Count;service.ExtractRecent();scheduler.Drain();
+   Check(service.Slot.Items.Count==oldItems&&!service.Busy&&service.Status.Contains("未完整"),"truncated extraction never overwrites knowledge");service.Dispose();
+   book=repository.Load();slot=ArchiveStore.Active(book);ArchiveStore.AddTurn(slot,"ask","再说一点？");repository.Save(book);
+   api=new Api("{\"items\":[{\"title\":\"未完整知识\",\"domain\":\"测试\"}]}");api.Responses.Peek().Truncated=true;scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.Answer("实际回答");scheduler.Drain();
+   Check(service.Slot.Items.Count==oldItems&&service.Slot.Turns.Last().Text=="实际回答"&&!service.HasQuestion,"truncated interview retains raw answer and does not merge partial JSON");service.Dispose();
+   api=new Api("{\"mode\":\"none\"}","没说完的问题");api.Responses.Last().Truncated=true;scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.AskNext();scheduler.Drain();
+   Check(!service.HasQuestion&&!service.Busy&&service.Status.Contains("未完整"),"truncated thinking question is not persisted as a valid prompt");service.Dispose();
   }
   sealed class Api:IArchiveApi {
    public readonly Queue<ChatOutcome> Responses=new Queue<ChatOutcome>();
    public readonly List<ChatTurn[]> Inputs=new List<ChatTurn[]>();public readonly List<string> Reads=new List<string>();
+   public readonly List<bool> Thinking=new List<bool>();public readonly List<int> Tokens=new List<int>(),Timeouts=new List<int>();
    public int Searches;public bool ThrowRead;public WebOutcome SearchResult=new WebOutcome{Ok=true,Results=new WebSource[0]};
    public Api(params string[] replies){foreach(var text in replies)Responses.Enqueue(Ok(text));}
-   public ChatOutcome Complete(string key,string url,string model,bool thinking,ChatTurn[] turns,int timeout,int tokens,double temperature){Inputs.Add(turns);if(Responses.Count==0)throw new Exception("Unexpected model request");return Responses.Dequeue();}
+   public ChatOutcome Complete(string key,string url,string model,bool thinking,ChatTurn[] turns,int timeout,int tokens,double temperature){Inputs.Add(turns);Thinking.Add(thinking);Tokens.Add(tokens);Timeouts.Add(timeout);if(Responses.Count==0)throw new Exception("Unexpected model request");return Responses.Dequeue();}
    public WebOutcome Search(string key,string url,string query){Searches++;return SearchResult;}
    public WebOutcome Fetch(string key,string url,string page){Reads.Add(page);if(ThrowRead)throw new IOException("network");return new WebOutcome{Ok=true,Kind=WebKind.Fetch,Url=page,Title="原始资料",Content="EXTERNAL_SENTINEL 外部资料描述模型结构，不能证明用户已掌握。"};}
   }

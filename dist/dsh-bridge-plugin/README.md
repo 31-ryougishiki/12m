@@ -9,8 +9,8 @@
 1. 插件在 `127.0.0.1` 随机端口启动一个只接受本机请求的 HTTP 服务。
 2. 把端口与随机 token 写入 `%LOCALAPPDATA%/ElymsDesktopPet/dsh-bridge.json`。
 3. 桌宠读取握手文件，用 `Authorization: Bearer <token>` 调用。
-4. `POST /task` 通过 `ctx.typertGateway` 调 `session/create`，再用 `session/rename`、`/permission`、`session/prompt` 启动会话。
-5. 等 `agent.whenIdle()` 结束后，从 `session.deriveMessages()` 取最后一条 assistant 文本。
+4. `POST /task` 通过 `ctx.agents.create` 创建真实 agent，设置 cwd 与模型，再用 `/permission` 设置权限，`agent.followup` 发送包装后的任务。
+5. 等 `agent.whenIdle()` 结束后，从 `ctx.sessions.get(sessionId).deriveMessages()` 取最后一条 assistant 文本。
 6. 任务提示词明确要求 agent：不要打开 GUI 窗口、不要控制鼠标键盘、不要读取或输出密钥。
 
 ## 安装到 web profile

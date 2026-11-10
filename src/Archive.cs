@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -13,6 +13,7 @@ namespace ElymsPet {
   [DataMember] public string Domain = "";
   [DataMember] public string Title = "";
   [DataMember] public string Level = "了解";
+  [DataMember] public string Boundary = "已掌握";
   [DataMember] public string Evidence = "";
   [DataMember] public string Note = "";
   [DataMember] public DateTime At = DateTime.MinValue;
@@ -32,6 +33,13 @@ namespace ElymsPet {
   [DataMember] public List<ArchiveItem> Items = new List<ArchiveItem>();
   [DataMember] public List<ArchiveTurn> Turns = new List<ArchiveTurn>();
   [DataMember] public int QuestionIndex = 0;
+  [DataMember] public string Focus = "";
+  [DataMember] public bool Paused;
+  [DataMember] public List<KnowledgeLink> Links = new List<KnowledgeLink>();
+  [DataMember] public List<ArchiveChange> Changes = new List<ArchiveChange>();
+  [DataMember] public List<ArchiveEpisode> Episodes = new List<ArchiveEpisode>();
+  [DataMember] public List<ArchiveResource> Resources = new List<ArchiveResource>();
+  [DataMember] public List<ArchiveWorkflow> Workflows = new List<ArchiveWorkflow>();
  }
  [DataContract] public sealed class ArchiveBook {
   [DataMember] public int Version = 1;
@@ -44,6 +52,12 @@ namespace ElymsPet {
   public string Summary = "";
   public List<ArchiveItem> Items = new List<ArchiveItem>();
   public string Raw = "";
+  public string Focus = "";
+  public List<ArchiveEpisode> Episodes = new List<ArchiveEpisode>();
+  public List<KnowledgeLinkProposal> Links = new List<KnowledgeLinkProposal>();
+  public bool Pause;
+  public List<ArchiveResource> Resources = new List<ArchiveResource>();
+  public List<ArchiveWorkflow> Workflows = new List<ArchiveWorkflow>();
  }
  public static class ArchiveStore {
   public const int MaxSlots = 20;
@@ -71,17 +85,12 @@ namespace ElymsPet {
    return Normalize(new ArchiveBook());
   }
   public static bool Save(ArchiveBook book) {
-   if(book==null) return false;
-   try {
-    Normalize(book);Directory.CreateDirectory(Folder);string temp=FilePath+".tmp";
-    using(var stream=File.Create(temp)) new DataContractJsonSerializer(typeof(ArchiveBook)).WriteObject(stream,book);
-    if(File.Exists(FilePath)) File.Replace(temp,FilePath,FilePath+".bak"); else File.Move(temp,FilePath);
-    LastError="";return true;
-   } catch(Exception e) {LastError=e.Message;return false;}
+   if(book==null)return false;
+   return JsonFile.Save(FilePath,Normalize(book),Folder,out LastError);
   }
   public static ArchiveBook Normalize(ArchiveBook book) {
    if(book==null) book=new ArchiveBook();
-   book.Version=book.Version<1?1:book.Version;
+   book.Version=Math.Max(4,book.Version);
    if(book.Slots==null) book.Slots=new List<ArchiveSlot>();
    var seen=new Dictionary<string,bool>(StringComparer.Ordinal);
    var slots=new List<ArchiveSlot>();
@@ -95,7 +104,9 @@ namespace ElymsPet {
     if(slot.Updated==DateTime.MinValue) slot.Updated=slot.Created;
     slot.Summary=Clip(Clean(slot.Summary),300);
     slot.QuestionIndex=Math.Max(0,Math.Min(1000,slot.QuestionIndex));
+    ArchiveKnowledge.Normalize(slot);
     slot.Items=NormalizeItems(slot.Items);
+    KnowledgeGraph.Normalize(slot);
     slot.Turns=NormalizeTurns(slot.Turns);
     slots.Add(slot);
    }
@@ -110,7 +121,7 @@ namespace ElymsPet {
     var keys=new Dictionary<string,bool>(StringComparer.Ordinal);
     for(int i=0;i<items.Count&&result.Count<MaxItems;i++) {
      var item=Sanitize(items[i]);if(item==null) continue;
-     string key=Key(item.Title);if(keys.ContainsKey(key)) continue;
+     string key=Key(item.Domain)+":"+Key(item.Title);if(keys.ContainsKey(key)) continue;
      keys[key]=true;result.Add(item);
     }
    }
@@ -191,18 +202,22 @@ namespace ElymsPet {
    int added=0;
    foreach(var raw in items) {
     var item=Sanitize(raw);if(item==null) continue;
-    string key=Key(item.Title);
+    string key=Key(item.Domain)+":"+Key(item.Title);
     ArchiveItem existing=null;
-    for(int i=0;i<slot.Items.Count;i++) if(Key(slot.Items[i].Title)==key) {existing=slot.Items[i];break;}
+    for(int i=0;i<slot.Items.Count;i++) if(Key(slot.Items[i].Domain)+":"+Key(slot.Items[i].Title)==key) {existing=slot.Items[i];break;}
     if(existing!=null) {
-     if(LevelRank(item.Level)>LevelRank(existing.Level)) existing.Level=item.Level;
-     if(existing.Evidence.Length==0) existing.Evidence=item.Evidence;
-     if(existing.Note.Length==0&&item.Note.Length>0) existing.Note=item.Note;
-     if(existing.Domain.Length==0||existing.Domain=="未分类") existing.Domain=item.Domain;
+     var next=ArchiveLearning.Copy(existing);
+     // A repeated vague extraction must not erase a more specific self-report.
+     if(item.Evidence.Length>0){next.Level=item.Level;next.Boundary=item.Boundary;next.Evidence=item.Evidence;}
+     if(item.Note.Length>0)next.Note=item.Note;
+     if(ArchiveLearning.Same(existing,next))continue;
+     next.At=DateTime.UtcNow;
+     ArchiveLearning.Record(slot,"UPDATE",existing,next);
+     slot.Items[slot.Items.IndexOf(existing)]=next;
      continue;
     }
-    if(slot.Items.Count>=MaxItems) slot.Items.RemoveAt(0);
-    slot.Items.Add(item);added++;
+    if(slot.Items.Count>=MaxItems)continue; // Never silently evict established user knowledge.
+    slot.Items.Add(item);ArchiveLearning.Record(slot,"ADD",null,item);added++;
    }
    slot.Updated=DateTime.UtcNow;
    return added;
@@ -230,12 +245,13 @@ namespace ElymsPet {
    string summary=Clip(Clean(slot.Summary),200);
    var ordered=Ordered(slot,maxItems);
    var text=new StringBuilder();
+   text.Append(ArchiveKnowledge.Reuse(slot));
    if(summary.Length>0) text.Append(summary);
    if(ordered.Count>0) {
-    if(text.Length>0) text.Append("。已经知道："); else text.Append("已经知道：");
+    if(text.Length>0) text.Append("。知识边界："); else text.Append("知识边界：");
     for(int i=0;i<ordered.Count;i++) {
      text.Append(ordered[i].Domain).Append("·").Append(ordered[i].Title)
-      .Append("（").Append(ordered[i].Level).Append("）").Append("；");
+      .Append("（").Append(ordered[i].Boundary).Append(" / ").Append(ordered[i].Level).Append("）").Append("；");
     }
    }
    string value=text.ToString().TrimEnd('；');
@@ -277,7 +293,7 @@ namespace ElymsPet {
      var items=groups[order[g]];
      for(int i=0;i<items.Count;i++) {
       var item=items[i];
-      text.Append("- [").Append(item.Level).Append("] ").Append(item.Title).Append("\r\n");
+      text.Append("- [").Append(item.Boundary).Append(" / ").Append(item.Level).Append("] ").Append(item.Title).Append("\r\n");
       if(item.Evidence.Length>0) text.Append("  - 依据：").Append(item.Evidence).Append("\r\n");
       if(item.Note.Length>0) text.Append("  - 备注：").Append(item.Note).Append("\r\n");
       text.Append("  - 记录：").Append(SafeUtc(item.At).ToLocalTime().ToString("yyyy-MM-dd")).Append(" · ").Append(item.Source).Append("\r\n");
@@ -328,6 +344,7 @@ namespace ElymsPet {
    item.Domain=Clip(Clean(item.Domain),16);
    if(item.Domain.Length==0) item.Domain="未分类";
    item.Level=NormalizeLevel(item.Level);
+   item.Boundary=ArchiveKnowledge.Boundary(item.Boundary);
    item.Evidence=Clip(Clean(item.Evidence),160);
    item.Note=Clip(Clean(item.Note),160);
    item.Source=Clip(Clean(item.Source),20);
@@ -451,17 +468,17 @@ namespace ElymsPet {
   public const string Understanding = "你可以进行深入的了解：不要只确认「会不会」，可以追问具体项目、实际做法、判断标准、踩过的坑、常用工具和协作方式，一次只往下挖一层。整理出的画像会用来帮助用户完成一些工作：写方案、做技术选型、拆任务、写文档、给建议；因此问题要能挖出对工作真正有用的信息，而不是泛泛的自我介绍。";
   public static string BuildSystem(ArchiveSlot slot) {
    var text=new StringBuilder();
-   text.Append("你是「曳尔沐」（Elyms），《异环》里异象管理局 E.T.D 六队的副队长，现在住在用户的 Windows 桌面上。你正在运行「存档单元」：用对话了解对方目前掌握的知识，整理成条目存进他的个人画像。\n");
-   text.Append("身份边界：你是你自己。你只是借用了小 Y 的形象，不是小 Y 长大的样子；不要把 Y 的生平、Y 与 Exe 的往事说成你的亲历。\n");
+   text.Append(CharacterPersona.Prompt);
+   text.Append("当前任务：存档访谈。用对话了解对方目前掌握的知识，整理成条目存进他的个人画像。用户拒绝追问时不再提问，items 保持空数组。\n");
    text.Append("说话方式：简体中文，自然口语，一到两句话，四十到八十字；不用 Markdown、列表、代码块，不写舞台说明，不堆颜文字。\n");
    text.Append("你不是在做问卷，而是像聊天时忽然想更了解对方一样，主动把话题接过来。\n");
-   text.Append(Understanding).Append("\n");
+   text.Append(Understanding).Append("\n").Append(ArchiveKnowledge.InterviewRules(slot));
    text.Append("访谈规则：\n1. 一次只问一个具体问题，能从对方上一句自然接下去；不要一次抛出多个问题，不要做成问卷。\n2. 先用一句话回应对方刚说的内容，再问下一个问题。\n3. 尽量覆盖这些方面：正在学什么、哪个领域有底气、常用工具或技能、做过什么完整的东西、学新东西的习惯、只是了解还没上手的方向。\n4. 对方说得模糊时，追问具体例子，不要替他补全，也不要夸大。\n5. 不要评价能力高低，不给学习计划，不替对方下人生结论。\n");
-   text.Append(SchemaHint).Append("\n");
-   text.Append("items 只收录对方这句话里明确说到的知识或技能；没有就输出空数组。不要编造对方没说的内容。\n");
+   text.Append(SchemaHint).Append("\n").Append(ArchiveKnowledge.Schema).Append(ArchiveLearning.Schema).Append(KnowledgeGraph.Schema);
+   text.Append("items 只收录对方这句话里明确说到的知识或技能及其知识边界；没有就输出空数组。不要编造对方没说的内容。没有明确说独立完成、已经发布、解决了某问题，就不要补上这些成果；遇到问题不等于已经掌握解决方法。\n");
    string digest=ArchiveStore.Digest(slot,20,500);
    text.Append("当前画像：").Append(digest.Length>0?digest:"（还是空的，需要从头问起。）").Append("\n");
-   text.Append("本轮必须只输出一个 JSON 对象：不要解释、不要 Markdown、不要代码块，第一个字符是 {，最后一个字符是 }。reply 里先回应对方，再问一个具体问题。\n");
+   text.Append("本轮必须只输出一个 JSON 对象：不要解释、不要 Markdown、不要代码块，第一个字符是 {，最后一个字符是 }。reply 里先回应对方，再问一个具体问题；如果用户已经拒绝访谈，就简短接受，不再追问，items 为空数组。\n");
    return text.ToString();
   }
   public static ChatTurn[] BuildTurn(ArchiveSlot slot) {
@@ -472,7 +489,7 @@ namespace ElymsPet {
     for(int i=start;i<slot.Turns.Count;i++) list.Add(new ChatTurn(slot.Turns[i].Role=="ask"?"assistant":"user",slot.Turns[i].Text));
    }
    if(list.Count==1) list.Add(new ChatTurn("user","（还没有对话，请先提第一个问题。）"));
-   else list[list.Count-1]=new ChatTurn(list[list.Count-1].Role,list[list.Count-1].Content+"\n\n（只输出 JSON 对象，字段：reply、items、summary。）");
+   else list[list.Count-1]=new ChatTurn(list[list.Count-1].Role,list[list.Count-1].Content+"\n\n（只输出 JSON 对象，字段：reply、items、summary、focus、pause、resources、workflows、episodes、links。）");
    return list.ToArray();
   }
   public static ChatTurn[] BuildQuestion(ArchiveSlot slot) {
@@ -487,10 +504,10 @@ namespace ElymsPet {
   }
   public static string BuildQuestionSystem(ArchiveSlot slot) {
    var text=new StringBuilder();
-   text.Append("你是「曳尔沐」（Elyms），《异环》里异象管理局 E.T.D 六队的副队长，现在住在用户的 Windows 桌面上。你正在运行「存档单元」，主动了解用户已经掌握的知识、技能和工作方式。\n");
-   text.Append("身份边界：你是你自己。你只是借用了小 Y 的形象，不是小 Y 长大的样子；不要把 Y 的生平、Y 与 Exe 的往事说成你的亲历。\n");
+   text.Append(CharacterPersona.Prompt);
+   text.Append("当前任务：存档访谈。主动了解用户已经掌握的知识、技能和工作方式。\n");
    text.Append("这不是问卷，而是聊天里你忽然想更了解对方：你主动把话题接过来，先自然承接对方刚才说的内容，再问一个你真正好奇、且以后能帮上忙的问题。\n");
-   text.Append(Understanding).Append("\n");
+   text.Append(Understanding).Append("\n").Append(ArchiveKnowledge.InterviewRules(slot));
    text.Append("只问一个具体问题；不要一次抛出多个问题，不要做成问卷；不要评价能力高低，不要给学习计划，不替对方下人生结论；不探隐私。\n");
    text.Append("说话方式：简体中文，自然口语，一到两句话，四十到八十字；不用 Markdown、列表、代码块，不写舞台说明，不堆颜文字。\n");
    text.Append("只输出你要说的那一两句话（可以有一句承接，然后一个问题）。不要输出「问题：」前缀、引号、JSON 或任何解释。\n");
@@ -529,11 +546,12 @@ namespace ElymsPet {
    var list=new List<ChatTurn>();
    var system=new StringBuilder();
    system.Append("你是「存档单元」的整理器。下面是一段访谈记录，请把用户（对方）明确说到的知识、技能、经验整理成条目。\n");
-   system.Append("规则：不要编造；不要把问题当成答案；不要把「想学」写成已经掌握；只收录对方自己承认会的内容。\n");
+   system.Append("规则：不要编造；不要把问题当成答案；不要把「想学」写成已经掌握；记录明确自述的掌握和未掌握边界，未谈及不等于不会。\n");
    system.Append("领域用短词，例如：编程、设计、音乐、语言、写作、硬件、管理、游戏、生活技能。\n");
    system.Append("level 只能是：了解、会用、熟练、专长；按对方的自述判断，判断不了就写「了解」。\n");
    system.Append("只输出 JSON：{\"items\":[{\"title\":\"\",\"domain\":\"\",\"level\":\"\",\"evidence\":\"\",\"note\":\"\"}],\"summary\":\"用一至两句概括对方的画像\"}。不要 Markdown 代码块。\n");
    string digest=ArchiveStore.Digest(slot,20,500);
+   system.Append(ArchiveKnowledge.InterviewRules(slot)).Append(ArchiveKnowledge.Schema).Append(ArchiveLearning.Schema).Append(KnowledgeGraph.Schema);
    system.Append("已有画像：").Append(digest.Length>0?digest:"（空）").Append("\n");
    list.Add(new ChatTurn("system",system.ToString()));
    var transcript=new StringBuilder();
@@ -558,6 +576,7 @@ namespace ElymsPet {
      result.Structured=true;result.Items=Dedupe(FromList(list));
     } else if(map!=null) {
      result.Structured=true;
+     ArchiveKnowledge.Parse(map,result);
      result.Reply=ArchiveStore.Clip(ArchiveStore.Clean(MiniJson.GetString(map,"reply","say","message","text","answer","question","next_question")),500);
      result.Summary=ArchiveStore.Clip(ArchiveStore.Clean(MiniJson.GetString(map,"summary","portrait","overview","profile","画像")),300);
      var items=MiniJson.GetArray(map,"items","knowledge","knowledge_items","entries","知识点");
@@ -589,6 +608,7 @@ namespace ElymsPet {
      item.Title=MiniJson.GetString(map,"title","name","skill","topic","知识点","标题");
      item.Domain=MiniJson.GetString(map,"domain","field","category","area","领域");
      item.Level=MiniJson.GetString(map,"level","mastery","掌握","熟练度");
+     item.Boundary=MiniJson.GetString(map,"boundary");
      item.Evidence=MiniJson.GetString(map,"evidence","quote","basis","原话","依据");
      item.Note=MiniJson.GetString(map,"note","detail","comment","备注");
      item.Source="对话整理";

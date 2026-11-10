@@ -17,6 +17,7 @@
  * @module dsh-elyms-bridge
  */
 
+import { JobRegistry } from './job-registry.js'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -255,7 +256,10 @@ async function runJob(ctx, logger, job, settings) {
     })
     job.handle = handle
     agent = handle.agent
+    // Creation/permission calls may finish after a cancellation or plugin unload.
+    if (job.cancelled) { agent.cancel({ kind: 'user' }); job.status = 'cancelled'; return }
     await setPermission(ctx, agent, job.permission)
+    if (job.cancelled) { agent.cancel({ kind: 'user' }); job.status = 'cancelled'; return }
     readJobProgress(ctx, job)
     agent.followup({
       id: randomUUID(),
@@ -381,8 +385,8 @@ export function apply(ctx, config = {}) {
   const logger = loggerFor(ctx)
   const token = randomBytes(24).toString('hex')
   const startedAt = new Date().toISOString()
-  const jobs = new Map()
-  let active = 0
+  const registry = new JobRegistry(settings.maxActive, settings.maxJobs)
+  const jobs = registry.jobs
 
   const snapshot = () => {
     const value = {
@@ -417,7 +421,7 @@ export function apply(ctx, config = {}) {
           startedAt,
           workspace: settings.workspace,
           webUrl: settings.webUrl,
-          active,
+          active: registry.active,
           jobs: jobs.size,
         })
         return
@@ -430,11 +434,6 @@ export function apply(ctx, config = {}) {
       }
 
       if (req.method === 'POST' && pathname === '/task') {
-        if (active >= settings.maxActive) {
-          const running = [...jobs.values()].find((job) => job.status === 'running' || job.status === 'queued')
-          sendJson(res, 409, { error: 'busy', jobId: running ? running.id : undefined })
-          return
-        }
         const body = await readJson(req)
         const task = typeof body.prompt === 'string' ? body.prompt.trim() : ''
         if (task === '') {
@@ -480,18 +479,28 @@ export function apply(ctx, config = {}) {
           endedAt: '',
           cancelled: false,
         }
-        jobs.set(job.id, job)
-        active += 1
-        if (jobs.size > settings.maxJobs) {
-          for (const [id, value] of jobs) {
-            if (jobs.size <= settings.maxJobs) break
-            if (value.status === 'done' || value.status === 'error' || value.status === 'cancelled') jobs.delete(id)
-          }
+        // The body await above can interleave requests. Reserve only after validation,
+        // in one synchronous operation, and reject bodies completing after shutdown.
+        if (!registry.tryAdd(job)) {
+          sendJson(res, registry.closed ? 503 : 409, {
+            error: registry.closed ? 'shutting down' : 'busy',
+            jobId: registry.busyJob?.id,
+          })
+          return
         }
-        sendJson(res, 202, { jobId: job.id, sessionId: '', title, status: 'queued' })
-        runJob(ctx, logger, job, settings).finally(() => {
-          active = Math.max(0, active - 1)
-        })
+        try {
+          sendJson(res, 202, { jobId: job.id, sessionId: '', title, status: 'queued' })
+        } catch (error) {
+          job.status = 'error'
+          registry.finish(job.id)
+          throw error
+        }
+        runJob(ctx, logger, job, settings)
+          .catch((error) => {
+            job.status = 'error'
+            job.error = error instanceof Error ? error.message : String(error)
+          })
+          .finally(() => registry.finish(job.id))
         return
       }
 
@@ -548,6 +557,7 @@ export function apply(ctx, config = {}) {
       logger.info?.(`[elyms-bridge] listening on http://${settings.host}:${port}; workspace ${settings.workspace}`)
     })
     return () => {
+      registry.close()
       try {
         server.close()
       } catch {}

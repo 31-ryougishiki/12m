@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -6,39 +6,12 @@ using System.Runtime.Serialization;
 using System.Text;
 
 namespace ElymsPet {
- /// <summary>一条长期记忆：她记住的关于对方的一件事。</summary>
- /// <remarks>记忆只存在本机 data 文件夹，格式是普通 JSON，可以直接打开查看或备份。</remarks>
- [DataContract] public sealed class MemoryItem {
-  [DataMember] public string Id = "";
-  [DataMember] public string Kind = "事实";
-  [DataMember] public string Text = "";
-  [DataMember] public string Entity = "";
-  [DataMember] public string Emotion = "";
-  [DataMember] public string Source = "明说";
-  [DataMember] public double Importance = 0.5;
-  [DataMember] public bool Core = false;
-  [DataMember] public bool Pending = false;
-  [DataMember] public int Hits = 1;
-  [DataMember] public DateTime Created = DateTime.MinValue;
-  [DataMember] public DateTime LastSeen = DateTime.MinValue;
-  [DataMember] public DateTime? Due = null;
- }
-
- /// <summary>全部记忆、已忘记的指纹和被排除的内容。</summary>
- [DataContract] public sealed class MemoryBook {
-  [DataMember] public int Schema = 1;
-  [DataMember] public MemoryItem[] Items = new MemoryItem[0];
-  [DataMember] public string[] Blocked = new string[0];
-  [DataMember] public DateTime Updated = DateTime.MinValue;
- }
-
  /// <summary>记忆的读写、合并、检索和遗忘曲线；纯本地计算，不依赖网络。</summary>
  public static class MemoryStore {
   public const int MaxItems = 300;
   public const int MaxPerReply = 3;
   public const int MaxTextLength = 200;
   public static readonly string[] Kinds = { "事实", "偏好", "习惯", "事件", "承诺", "关系" };
-  const double K1 = 1.2, B = 0.75;
   public static string LastError = "";
   public static string FilePath { get { return Path.Combine(Storage.Folder, "memories.json"); } }
   public static bool Exists { get { return File.Exists(FilePath); } }
@@ -48,6 +21,9 @@ namespace ElymsPet {
   }
   public static MemoryBook Load() {
    MemoryBook book = JsonFile.Load<MemoryBook>(FilePath, out LastError);
+   return Prepare(book);
+  }
+  public static MemoryBook Prepare(MemoryBook book) {
    if (book == null) return NewBook();
    if (book.Items == null) book.Items = new MemoryItem[0];
    if (book.Blocked == null) book.Blocked = new string[0];
@@ -103,29 +79,33 @@ namespace ElymsPet {
   /// <summary>写入一批记忆；返回新增条数。重复的内容只增加出现次数。</summary>
   public static int Add(MemoryBook book, MemoryItem[] items) { return Add(book, items, DateTime.UtcNow); }
   public static int Add(MemoryBook book, MemoryItem[] items, DateTime now) {
-   if (book == null || items == null || items.Length == 0) return 0;
+   return Apply(book, items, now).Added;
+  }
+  public static MemoryMutation Apply(MemoryBook book, MemoryItem[] items, DateTime now) {
+   var result = new MemoryMutation();
+   if (book == null || items == null || items.Length == 0) return result;
    var list = new List<MemoryItem>();
    if (book.Items != null) for (int i = 0; i < book.Items.Length; i++) if (book.Items[i] != null) list.Add(book.Items[i]);
-   int added = 0;
    for (int i = 0; i < items.Length; i++) {
     MemoryItem item = Normalize(items[i]);
-    if (item == null) continue;
-    if (IsBlocked(book, Fingerprint(item.Text))) continue;
+    if (item == null || IsBlocked(book, Fingerprint(item.Text))) { result.Rejected++; continue; }
     int index = IndexOf(list, item);
-    if (index >= 0) Merge(list[index], item, now);
+    if (index >= 0) { Merge(list[index], item, now); result.Updated++; }
     else {
      item.Id = NewId();
      item.Created = now;
      item.LastSeen = now;
      item.Hits = 1;
      list.Add(item);
-     added++;
+     result.Added++;
     }
    }
-   Trim(list, now);
-   book.Items = list.ToArray();
-   book.Updated = now;
-   return added;
+   if (result.Changed) {
+    Trim(list, now);
+    book.Items = list.ToArray();
+    book.Updated = now;
+   }
+   return result;
   }
   static int IndexOf(List<MemoryItem> list, MemoryItem item) {
    string fp = Fingerprint(item.Text);
@@ -182,76 +162,8 @@ namespace ElymsPet {
    return 1.0 / (1.0 + Math.Exp(-(baseLevel - 0.7) * 2.2));
   }
 
-  /// <summary>按相关度、激活度和重要性挑出这次的记忆。</summary>
-  public static MemoryItem[] Search(MemoryBook book, string query, DateTime now, int top) {
-   if (book == null || book.Items == null || top <= 0) return new MemoryItem[0];
-   var items = new List<MemoryItem>();
-   var maps = new List<Dictionary<string, int>>();
-   var lengths = new List<int>();
-   var df = new Dictionary<string, int>();
-   for (int i = 0; i < book.Items.Length; i++) {
-    MemoryItem item = book.Items[i];
-    if (item == null || item.Pending) continue;
-    var tokens = new List<string>();
-    Tokens((item.Text ?? "") + " " + (item.Entity ?? ""), tokens);
-    var map = new Dictionary<string, int>();
-    for (int k = 0; k < tokens.Count; k++) {
-     int seen; map.TryGetValue(tokens[k], out seen); map[tokens[k]] = seen + 1;
-    }
-    foreach (KeyValuePair<string, int> pair in map) {
-     int count; df.TryGetValue(pair.Key, out count); df[pair.Key] = count + 1;
-    }
-    items.Add(item); maps.Add(map); lengths.Add(tokens.Count);
-   }
-   int total = items.Count;
-   if (total == 0) return new MemoryItem[0];
-   double sum = 0;
-   for (int i = 0; i < lengths.Count; i++) sum += lengths[i];
-   double average = sum / total;
-   if (average <= 0) average = 1;
-   var queryMap = new Dictionary<string, int>();
-   var queryTokens = new List<string>();
-   Tokens(query, queryTokens);
-   for (int i = 0; i < queryTokens.Count; i++) {
-    int seen; queryMap.TryGetValue(queryTokens[i], out seen); queryMap[queryTokens[i]] = seen + 1;
-   }
-   var scores = new double[total];
-   var rels = new double[total];
-   double best = 0;
-   for (int i = 0; i < total; i++) {
-    double relevance = 0;
-    if (queryMap.Count > 0) {
-     double raw = 0;
-     foreach (KeyValuePair<string, int> pair in queryMap) {
-      int tf;
-      if (!maps[i].TryGetValue(pair.Key, out tf) || tf == 0) continue;
-      int docs; df.TryGetValue(pair.Key, out docs); if (docs <= 0) docs = 1;
-      double idf = Math.Log(1.0 + (total - docs + 0.5) / (docs + 0.5));
-      raw += idf * (tf * (K1 + 1)) / (tf + K1 * (1 - B + B * lengths[i] / average));
-     }
-     relevance = 1.0 - Math.Exp(-raw / 2.2);
-     if (relevance > best) best = relevance;
-    }
-    rels[i] = relevance;
-    scores[i] = 0.58 * relevance + 0.27 * Activation(items[i], now) + 0.15 * items[i].Importance;
-   }
-   bool filtered = queryMap.Count > 0;
-   if (filtered && best < 0.08) return new MemoryItem[0];
-   if (top > total) top = total;
-   var picked = new List<MemoryItem>();
-   var used = new bool[total];
-   for (int k = 0; k < top; k++) {
-    int bestIndex = -1; double bestScore = double.MinValue;
-    for (int i = 0; i < total; i++) {
-     if (used[i]) continue;
-     if (filtered && rels[i] < 0.06) continue;
-     if (scores[i] > bestScore) { bestScore = scores[i]; bestIndex = i; }
-    }
-    if (bestIndex < 0) break;
-    used[bestIndex] = true;
-    picked.Add(items[bestIndex]);
-   }
-   return picked.ToArray();
+  public static MemoryItem[] Search(MemoryBook book,string query,DateTime now,int top) {
+   return MemoryRetrieval.Search(book,query,now,top);
   }
 
   public static MemoryItem[] Sorted(MemoryBook book) {
@@ -318,11 +230,12 @@ namespace ElymsPet {
   }
 
   /// <summary>检索结果拼成交给模型的上下文；以「记忆可用」开头时提示词才会附上记忆规则。</summary>
-  public static string Recall(MemoryBook book, string query, bool enabled) {
+  public static string Recall(MemoryBook book, string query, bool enabled) {return Recall(book,query,enabled,DateTime.UtcNow);}
+  public static string Recall(MemoryBook book, string query, bool enabled, DateTime now) {
    if (!enabled) return "记忆关闭了。";
-   MemoryItem[] items = Search(book, query, DateTime.UtcNow, 5);
+   MemoryItem[] items = Search(book, query, now, 5);
    if (items.Length == 0) return "记忆可用。你们还没有存下值得记的事。";
-   return "记忆可用。你记得的事：\n" + Prompt(book, items, DateTime.UtcNow);
+   return "记忆可用。你记得的事：\n" + Prompt(book, items, now);
   }
 
   /// <summary>导出给人看的概要，聊天里只带最相关的一小段。</summary>
@@ -429,138 +342,4 @@ namespace ElymsPet {
   }
  }
 
- /// <summary>从回复里取出记忆标记；标记本身不会显示给对方。</summary>
- public static class MemoryMarkers {
-  public static bool HasMarker(string reply) {
-   if (string.IsNullOrEmpty(reply)) return false;
-   return reply.IndexOf("[[REMEMBER]]", StringComparison.Ordinal) >= 0 || reply.IndexOf("[[MEMORY]]", StringComparison.Ordinal) >= 0;
-  }
-  public static MemoryItem[] Extract(ref string reply) {
-   var items = new List<MemoryItem>();
-   string text = reply ?? "";
-   if (!HasMarker(text)) return new MemoryItem[0];
-   int cursor = 0;
-   var kept = new StringBuilder();
-   while (cursor < text.Length) {
-    int open = NextOpen(text, cursor);
-    if (open < 0) { kept.Append(text.Substring(cursor)); break; }
-    kept.Append(text.Substring(cursor, open - cursor));
-    bool remember = string.Compare(text, open, "[[REMEMBER]]", 0, 12, StringComparison.Ordinal) == 0;
-    string openTag = remember ? "[[REMEMBER]]" : "[[MEMORY]]";
-    string closeTag = remember ? "[[/REMEMBER]]" : "[[/MEMORY]]";
-    int bodyStart = open + openTag.Length;
-    int close = text.IndexOf(closeTag, bodyStart, StringComparison.Ordinal);
-    if (close < 0) { cursor = bodyStart; continue; }
-    string body = text.Substring(bodyStart, close - bodyStart).Trim();
-    MemoryItem item = ParseBody(body);
-    if (item != null && items.Count < MemoryStore.MaxPerReply) items.Add(item);
-    cursor = close + closeTag.Length;
-   }
-   reply = Collapse(kept.ToString());
-   return items.ToArray();
-  }
-  static int NextOpen(string text, int from) {
-   int a = text.IndexOf("[[REMEMBER]]", from, StringComparison.Ordinal);
-   int b = text.IndexOf("[[MEMORY]]", from, StringComparison.Ordinal);
-   if (a < 0) return b;
-   if (b < 0) return a;
-   return a < b ? a : b;
-  }
-  static string Collapse(string text) {
-   text = (text ?? "").Replace("\r\n", "\n").Trim();
-   while (text.IndexOf("\n\n\n", StringComparison.Ordinal) >= 0) text = text.Replace("\n\n\n", "\n\n");
-   return text;
-  }
-  static MemoryItem ParseBody(string body) {
-   if (string.IsNullOrEmpty(body)) return null;
-   body = body.Replace("\r", "\n");
-   string[] parts = body.Split(new char[] { ';', '；', '\n', '|', '｜' });
-   string text = "", entity = "", emotion = "", kind = "";
-   double importance = -1;
-   bool core = false;
-   DateTime? due = null;
-   var loose = new List<string>();
-   for (int i = 0; i < parts.Length; i++) {
-    string part = parts[i].Trim();
-    if (part.Length == 0) continue;
-    int eq = part.IndexOf('='); if (eq < 0) eq = part.IndexOf('＝');
-    if (eq <= 0) {
-     if (MemoryStore.IsKind(part) && kind.Length == 0) kind = part; else loose.Add(part);
-     continue;
-    }
-    string key = part.Substring(0, eq).Trim().ToLowerInvariant();
-    string value = part.Substring(eq + 1).Trim();
-    if (key == "kind" || key == "type" || key == "类型" || key == "种类") kind = value;
-    else if (key == "entity" || key == "主体" || key == "对象") entity = value;
-    else if (key == "emotion" || key == "情绪" || key == "心情") emotion = value;
-    else if (key == "text" || key == "content" || key == "内容" || key == "记忆") text = value;
-    else if (key == "important" || key == "importance" || key == "重要") {
-     double parsed;
-     if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)) importance = parsed;
-    } else if (key == "core" || key == "核心") core = value == "true" || value == "1" || value == "是";
-    else if (key == "due" || key == "到期" || key == "期限") {
-     DateTime parsedDue;
-     if (DateTime.TryParse(value, out parsedDue)) due = parsedDue;
-    } else loose.Add(part);
-   }
-   if (text.Length == 0) text = string.Join("，", loose.ToArray());
-   text = text.Trim();
-   if (text.Length == 0) return null;
-   if (!MemoryStore.IsKind(kind)) kind = "事实";
-   var item = new MemoryItem { Kind = kind, Text = text, Entity = entity, Emotion = emotion, Due = due, Core = core || kind == "关系" };
-   if (importance >= 0) item.Importance = Math.Max(0, Math.Min(1, importance));
-   else item.Importance = kind == "承诺" ? 0.8 : (kind == "偏好" || kind == "习惯") ? 0.6 : 0.5;
-   item.Source = "明说";
-   return item;
-  }
- }
-
- /// <summary>桌宠这一侧的记忆：读盘、写入、检索和面板操作。</summary>
- public sealed class MemoryService {
-  readonly PetWindow pet;
-  MemoryBook book;
-  public int Revision { get; private set; }
-  public string LastError = "";
-  public event Action Changed;
-  public MemoryService(PetWindow target) {
-   pet = target;
-   book = pet.IsPreview ? MemoryStore.Demo() : MemoryStore.Load();
-   if (book == null) book = MemoryStore.NewBook();
-  }
-  public MemoryBook Book { get { return book; } }
-  public MemoryItem[] Items { get { return MemoryStore.Sorted(book); } }
-  public int Count { get { return book.Items == null ? 0 : book.Items.Length; } }
-  /// <summary>发给模型的记忆上下文；以「记忆可用」开头时，提示词里才会附上记忆规则。</summary>
-  public string Recall(string query) {
-   return MemoryStore.Recall(book, query, pet.State == null || pet.State.MemoryEnabled);
-  }
-  public int Remember(MemoryItem[] items) {
-   if (items == null || items.Length == 0) return 0;
-   int added = MemoryStore.Add(book, items);
-   if (added > 0) { Save(); Touch(); }
-   return added;
-  }
-  public MemoryItem[] Observe(ref string reply) {
-   MemoryItem[] items = MemoryMarkers.Extract(ref reply);
-   if (items.Length > 0) Remember(items);
-   return items;
-  }
-  public bool Confirm(string id) {
-   if (!MemoryStore.Confirm(book, id)) return false;
-   Save(); Touch(); return true;
-  }
-  public bool Forget(string id) {
-   if (!MemoryStore.Forget(book, id)) return false;
-   Save(); Touch(); return true;
-  }
-  public void Clear() {
-   MemoryStore.Clear(book);
-   Save(); Touch();
-  }
-  public void Save() {
-   if (pet.IsPreview) return;
-   if (!MemoryStore.Save(book)) LastError = MemoryStore.LastError;
-  }
-  void Touch() { Revision++; if (Changed != null) Changed(); }
- }
 }

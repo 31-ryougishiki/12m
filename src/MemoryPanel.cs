@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -7,7 +7,7 @@ using System.Windows.Controls;
 
 namespace ElymsPet {
  /// <summary>「记忆」页：她记住的事、待确认的推断，以及忘记；存在本机，可以随时删。</summary>
- public sealed class MemoryPanel {
+ public sealed class MemoryPanel : IDisposable {
   readonly PetWindow pet;
   readonly MemoryService memory;
   StackPanel list;
@@ -19,34 +19,35 @@ namespace ElymsPet {
    memory.Changed += Refresh;
    Refresh();
   }
+  public void Dispose() { memory.Changed -= Refresh; }
   Window Owner { get { return pet.Panel; } }
   MessageBoxResult Ask(string text, string title) {
-   return Owner == null ? MessageBox.Show(text, title) : MessageBox.Show(Owner, text, title);
+   return Owner == null ? PopupDialog.Show(text, title) : PopupDialog.Show(Owner, text, title);
   }
   MessageBoxResult Ask(string text, string title, MessageBoxButton buttons, MessageBoxImage icon) {
-   return Owner == null ? MessageBox.Show(text, title, buttons, icon) : MessageBox.Show(Owner, text, title, buttons, icon);
+   return Owner == null ? PopupDialog.Show(text, title, buttons, icon) : PopupDialog.Show(Owner, text, title, buttons, icon);
   }
   UIElement Build() {
    var tab = new StackPanel();
-   status = Ui.Text("", 12, "#C8D2EB");
+   status = Ui.Text("", 12, "#78616A");
    var head = Ui.Stack(
-    Ui.Text("记忆 · 她记得的事", 18, "#E7EDFC"),
-    Ui.Text("聊天里值得长期记住的事，她会自己记下来；重启之后还在。全部保存在本机数据文件夹，随时可以删。", 12, "#A6B5CF"),
+    Ui.Text("记忆 · 她记得的事", 18, "#4F3B43"),
+    Ui.Text("聊天里值得长期记住的事，她会自己记下来；重启之后还在。全部保存在本机数据文件夹，随时可以删。", 12, "#78616A"),
     status,
     Ui.Row(Ui.Button("打开数据文件夹", OpenFolder, false), Ui.Button("忘记全部", ClearAll, false)),
-    Ui.Text("只有你说过的话才算数；她自己猜的会标成「待确认」，你确认之后才会在聊天里用到。", 11, "#8FA4C7"));
+    Ui.Text("只有你说过的话才算数；她自己猜的会标成「待确认」，你确认之后才会在聊天里用到。", 11, "#795F69"));
    tab.Children.Add(Ui.Card(head));
    list = new StackPanel { Margin = new Thickness(0, 4, 0, 10) };
    var body = Ui.Stack(
-    Ui.Text("全部记忆", 18, "#E7EDFC"),
-    Ui.Text("越靠前是越近提到的。点「忘记」会彻底删掉这一条，同样的内容也不会再被记回来。", 12, "#A6B5CF"),
+    Ui.Text("全部记忆", 18, "#4F3B43"),
+    Ui.Text("越靠前是越近提到的。点「忘记」会彻底删掉这一条，同样的内容也不会再被记回来。", 12, "#78616A"),
     list);
    tab.Children.Add(Ui.Card(body));
    return tab;
   }
   void OpenFolder() {
    try { Directory.CreateDirectory(Storage.Folder); Process.Start("explorer.exe", Storage.Folder); }
-   catch (Exception e) { MessageBox.Show(Owner, "打不开数据文件夹：" + e.Message, "记忆"); }
+   catch (Exception e) { PopupDialog.Show(Owner, "打不开数据文件夹：" + e.Message, "记忆"); }
   }
   void ClearAll() {
    if (memory.Count == 0) return;
@@ -62,7 +63,7 @@ namespace ElymsPet {
    if (memory.LastError.Length > 0) note += " · 上次保存出错：" + memory.LastError;
    status.Text = note;
    if (items.Length == 0) {
-    list.Children.Add(Ui.Text("还没有记忆。多聊几次，值得记住的事会出现在这里。", 12, "#8FA4C7"));
+    list.Children.Add(Ui.Text("还没有记忆。多聊几次，值得记住的事会出现在这里。", 12, "#795F69"));
     return;
    }
    int shown = 0;
@@ -71,15 +72,15 @@ namespace ElymsPet {
     list.Children.Add(Row(items[i]));
     shown++;
    }
-   if (items.Length > shown) list.Children.Add(Ui.Text("还有 " + (items.Length - shown) + " 条更早的记忆，没有全部显示。", 11, "#8FA4C7"));
+   if (items.Length > shown) list.Children.Add(Ui.Text("还有 " + (items.Length - shown) + " 条更早的记忆，没有全部显示。", 11, "#795F69"));
   }
   UIElement Row(MemoryItem item) {
    string head = item.Kind + " · " + TimeText.Local(item.LastSeen) + " · 提到 " + item.Hits + " 次";
    if (item.Core) head += " · 核心";
    if (item.Pending) head += " · 待确认";
-   var top = Ui.Text(head, 11, item.Pending ? "#E7C87C" : "#8FA4C7");
+   var top = Ui.Text(head, 11, item.Pending ? "#8F642D" : "#795F69");
    top.Margin = new Thickness(0, 0, 0, 4);
-   var text = Ui.Text(item.Text, 13.5, "#DCE5F7");
+   var text = Ui.Text(item.Text, 13.5, "#59434B");
    text.Margin = new Thickness(0, 0, 0, 6);
    var buttons = new List<UIElement>();
    if (item.Pending) {
@@ -90,7 +91,7 @@ namespace ElymsPet {
    buttons.Add(Ui.Button("忘记", delegate { memory.Forget(target); }, false));
    var stack = Ui.Stack(top, text, Ui.Row(buttons.ToArray()));
    return new Border {
-    Background = Ui.Brush("#14203A"), BorderBrush = Ui.Brush("#26354F"), BorderThickness = new Thickness(1),
+    Background = Ui.Brush("#FFF5EE"), BorderBrush = Ui.Brush("#E9D6CF"), BorderThickness = new Thickness(1),
     CornerRadius = new CornerRadius(12), Padding = new Thickness(14, 11, 14, 8), Margin = new Thickness(0, 0, 0, 9), Child = stack
    };
   }

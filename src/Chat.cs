@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -22,107 +22,16 @@ namespace ElymsPet {
   public int Status;
   public double Seconds;
   public int PromptTokens, CompletionTokens;
+  public string Model = "", FinishReason = "";
+  public bool Truncated;
   public static ChatOutcome Fail(string error,string detail,int status,double seconds) {
    return new ChatOutcome {Ok=false,Error=error??"没有接通。",Detail=detail??"",Status=status,Seconds=seconds};
-  }
- }
- public sealed class ChatSession {
-  public const int MaxContextTokens=1000000;
-  readonly List<ChatTurn> turns = new List<ChatTurn>();
-  public int Count {get {return turns.Count;}}
-  public ChatTurn[] History {get {return turns.ToArray();}}
-  public int ContextTokens {get;private set;}
-  public int ContextLimit {get {return MaxContextTokens;}}
-  /// <summary>这一轮注入的记忆上下文，以「记忆可用」开头时提示词里会附上记忆规则。</summary>
-  public string MemoryContext = "";
-  public static string HistoryPath {get {return Path.Combine(Storage.Folder,"chat-history.json");}}
-  public void Clear() {turns.Clear();ContextTokens=0;Save();}
-  public ChatTurn[] Build(PetState state,string user) {return Build(state,user,"","","");}
-  public ChatTurn[] Build(PetState state,string user,string profileDigest) {return Build(state,user,profileDigest,"","");}
-  public ChatTurn[] Build(PetState state,string user,string profileDigest,string dshContext) {return Build(state,user,profileDigest,dshContext,"");}
-  public ChatTurn[] Build(PetState state,string user,string profileDigest,string dshContext,string webContext) {
-   var list = new List<ChatTurn>();
-   list.Add(new ChatTurn("system",Persona.SystemPrompt(state,DateTime.Now,profileDigest,dshContext,webContext,MemoryContext)));
-   for(int i=0;i<turns.Count;i++) list.Add(turns[i]);
-   list.Add(new ChatTurn("user",Cap(user,4000)));
-   int budget=MaxContextTokens-8192;
-   int total=EstimateList(list);
-   while(list.Count>2&&total>budget) {total-=EstimateTurn(list[1]);list.RemoveAt(1);}
-   ContextTokens=total;
-   return list.ToArray();
-  }
-  public void Remember(string user,string reply) {
-   turns.Add(new ChatTurn("user",Cap(user,4000)));
-   turns.Add(new ChatTurn("assistant",Cap(reply,4000)));
-   TrimHistory();
-   Save();
-  }
-  public void RememberAssistant(string text) {
-   text=Cap(text,4000);
-   if(text.Length==0)return;
-   turns.Add(new ChatTurn("assistant",text));
-   TrimHistory();
-   Save();
-  }
-  public ChatTurn[] Recent(int count) {
-   int start=Math.Max(0,turns.Count-Math.Max(0,count));
-   var list=new List<ChatTurn>();
-   for(int i=start;i<turns.Count;i++)list.Add(turns[i]);
-   return list.ToArray();
-  }
-  public void Load() {
-   turns.Clear();ContextTokens=0;
-   string error;
-   ChatStore store=JsonFile.Load<ChatStore>(HistoryPath,out error);
-   if(store==null||store.turns==null)return;
-   for(int i=0;i<store.turns.Length;i++) {
-    ChatStoredTurn item=store.turns[i];
-    if(item==null||string.IsNullOrEmpty(item.content))continue;
-    string role=item.role=="assistant"?"assistant":"user";
-    turns.Add(new ChatTurn(role,item.content));
-   }
-   TrimHistory();
-  }
-  public void Save() {
-   try {
-    var store=new ChatStore {turns=new ChatStoredTurn[turns.Count]};
-    for(int i=0;i<turns.Count;i++) store.turns[i]=new ChatStoredTurn {role=turns[i].Role,content=turns[i].Content};
-    string error;
-    JsonFile.Save(HistoryPath,store,Storage.Folder,out error);
-   } catch {}
-  }
-  void TrimHistory() {
-   int budget=MaxContextTokens-16384;
-   int total=EstimateList(turns);
-   while(total>budget&&turns.Count>0) {total-=EstimateTurn(turns[0]);turns.RemoveAt(0);}
-   ContextTokens=total;
-  }
-  static int EstimateList(List<ChatTurn> list) {
-   int total=0;
-   for(int i=0;i<list.Count;i++) total+=EstimateTurn(list[i]);
-   return total;
-  }
-  static int EstimateTurn(ChatTurn turn) {
-   return EstimateTokens(turn.Role)+EstimateTokens(turn.Content)+4;
-  }
-  public static int EstimateTokens(string text) {
-   if(string.IsNullOrEmpty(text)) return 0;
-   int cjk=0,other=0;
-   for(int i=0;i<text.Length;i++) {
-    char c=text[i];
-    if(c>=0x2E80&&c<=0x9FFF) cjk++;
-    else other++;
-   }
-   return cjk+(other+3)/4;
-  }
-  static string Cap(string text,int max) {
-   text=(text??"").Trim();
-   return text.Length<=max?text:text.Substring(0,max)+"…";
   }
  }
  public static class DeepSeek {
   public const string DefaultBase = "https://api.deepseek.com";
   public const string DefaultModel = "deepseek-flash";
+  public const double DefaultTemperature = 0.7;
   static DeepSeek() {
    try {ServicePointManager.SecurityProtocol=SecurityProtocolType.Tls12|SecurityProtocolType.Tls11;ServicePointManager.Expect100Continue=false;} catch {}
   }
@@ -147,7 +56,7 @@ namespace ElymsPet {
   }
   public static string Endpoint(string baseUrl) {return NormalizeBaseUrl(baseUrl)+"/chat/completions";}
   public static ChatOutcome Complete(string apiKey,string baseUrl,string model,bool thinking,ChatTurn[] turns,int timeoutSeconds) {
-   return Complete(apiKey,baseUrl,model,thinking,turns,timeoutSeconds,thinking?2048:600,1.1);
+   return Complete(apiKey,baseUrl,model,thinking,turns,timeoutSeconds,thinking?2048:600,DefaultTemperature);
   }
   public static ChatOutcome Complete(string apiKey,string baseUrl,string model,bool thinking,ChatTurn[] turns,int timeoutSeconds,int maxTokens,double temperature) {
    var watch=Stopwatch.StartNew();
@@ -201,7 +110,7 @@ namespace ElymsPet {
    request.Method="POST";
    request.ContentType="application/json; charset=utf-8";
    request.Accept="application/json";
-   request.UserAgent="ElymsDesktopPet/1.6";
+   request.UserAgent=AppVersion.UserAgent;
    request.Timeout=Math.Max(5,timeoutSeconds)*1000;
    request.ReadWriteTimeout=Math.Max(5,timeoutSeconds)*1000;
    request.KeepAlive=false;
@@ -257,8 +166,9 @@ namespace ElymsPet {
     return ChatOutcome.Fail("这次没有收到文字回复，再试一次？","empty content, finish="+finish,200,seconds);
    }
    content=content.Trim();
-   if(content.Length>4000) content=content.Substring(0,4000)+"…";
-   var outcome=new ChatOutcome {Ok=true,Text=content,Status=200,Seconds=seconds};
+   bool clipped=content.Length>4000;
+   if(clipped) content=content.Substring(0,4000)+"…";
+   var outcome=new ChatOutcome {Ok=true,Text=content,Status=200,Seconds=seconds,Model=response.model??"",FinishReason=finish??"",Truncated=finish=="length"||clipped};
    if(response.usage!=null) {outcome.PromptTokens=response.usage.prompt_tokens;outcome.CompletionTokens=response.usage.completion_tokens;}
    return outcome;
   }
@@ -336,10 +246,10 @@ namespace ElymsPet {
   [DataMember] public int completion_tokens;
   [DataMember] public int total_tokens;
  }
- [DataContract] sealed class ChatStore {
+ [DataContract] public sealed class ChatStore {
   [DataMember] public ChatStoredTurn[] turns;
  }
- [DataContract] sealed class ChatStoredTurn {
+ [DataContract] public sealed class ChatStoredTurn {
   [DataMember] public string role;
   [DataMember] public string content;
  }

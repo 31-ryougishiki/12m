@@ -41,6 +41,7 @@ namespace ElymsPet {
   [DataMember] public bool AutoLifeDsh = false;
   [DataMember] public bool MemoryEnabled = true;
   [DataMember] public int Schema = 8;
+  public PetState Snapshot() { return (PetState)MemberwiseClone(); }
   public void Normalize() {
    Scale = double.IsNaN(Scale) || double.IsInfinity(Scale) ? 1 : Math.Max(.65, Math.Min(1.6, Scale));
    Energy = double.IsNaN(Energy) ? 90 : Math.Max(0, Math.Min(100, Energy));
@@ -100,23 +101,35 @@ namespace ElymsPet {
  }
  public static class Dialogue {
   public static readonly string[] Idle = {
-   "信号满格。今天的连接也很稳定呀。", "路过你的桌面，顺便留一个微笑。", "有趣的事，可以慢慢讲给我听。", "你的进度已经缓存，休息一下也没关系。",
-   "如果灵感掉线了，我们就先喝一口水。", "小小的窗口，也装得下一次好好相遇。", "我正在这里，接收今天的好消息。", "不用想好开场白，直接说就可以啦。",
-   "屏幕外的风景，也值得偶尔看一眼。", "有时候，安静陪着也是一种回应。", "把今天的一个小愿望，留在便签里吧。", "忙你的，我会在这里慢慢等。" };
-  public static readonly string[] Touch = { "收到啦，一份来自你的友好信号。", "嗯？你是在确认我有没有掉线吗？", "这一下，我记到今天的好心情里了。", "连接成功，又多一点熟悉了。", "摸摸头也是一种通讯方式呀。", "在哦，回应速度是不是很快？" };
-  public static readonly string[] Food = { "数据小点心，咔嚓！补给收到。", "谢谢招待，这份心意比点心还甜。", "缓存补充完成！一起继续今天吧。" };
+   "在吗在吗？不急着回，我只是路过来打个招呼。", "今天有什么小插曲？无聊的那种也算。", "有趣的事，可以慢慢讲给我听。", "忙完这一段，要不要给自己放个小假？",
+   "我有点好奇，你会保留已经通关的游戏吗？", "要是给今天起个标题，你会选什么？", "有没有什么事，做之前嫌麻烦，做完却很开心？", "不用想好开场白，直接说就可以啦。",
+   "屏幕外的风景，也值得偶尔看一眼。", "有时候，安静陪着也是一种回应。", "想起什么有趣的小事，可以写进便签，免得一会儿忘了。", "忙你的，有事再叫我。" };
+  public static readonly string[] Touch = { "嗯？找我有事，还是随便打个招呼？", "接通啦，这次轮到你先说。", "好好，我知道你在这里啦。", "这么熟练，看来不是第一次找我了？", "诶，副队长的发型也要维护一下嘛。", "在哦，回应速度是不是很快？" };
+  public static readonly string[] Food = { "数据小点心，咔嚓！补给收到。", "谢谢招待，这份心意比点心还甜。", "这下有精神啦！一起继续今天吧。" };
   public static string Reply(string input) {
    string t=(input??"").Trim().ToLowerInvariant();
-   if(t.Contains("晚安")||t.Contains("睡")) return "那就把今天暂时存档吧。晚安，明天再连接。";
+   if(t.Contains("别说话")||t.Contains("别打扰")||t.Contains("我忙")) return "好，你忙你的。有事再叫我。";
+   if(t.Contains("晚安")||t.Contains("睡")) return "好，今天就到这里。晚安，剩下的事明天再说。";
    if(t.Contains("累")||t.Contains("烦")||t.Contains("难过")) return "收到你的心情了。先喘口气，好吗？不急着把一切处理完。";
-   if(t=="y"||t.Contains("y是谁")||t.Contains("谁是y")||t.Contains("小y")||t.Contains("身份")) return "我是曳尔沐。借用过的形象，和一个人自己的经历，是两件事哦。";
+   if(MentionsY(t)||t.Contains("身份")) return "我是曳尔沐。借用过的形象，和一个人自己的经历，是两件事哦。";
    if(t.Contains("exe")) return "六队的工作还要配合进行呢。至于他的往事，那属于他和他记得的人。";
    if(t.Contains("灵可")) return "小灵可对有趣的东西总是很敏锐呢，下次也一起聊聊游戏吧。";
    if(t.Contains("工作")||t.Contains("学习")||t.Contains("专注")) return "我们先完成一小段吧。打开专注计时，我陪你守着这段时间。";
    if(t.Contains("喜欢")||t.Contains("谢谢")) return "这份心意接收到了。我也很高兴和你待在一起。";
    if(t.Contains("早")||t.Contains("你好")||t.Contains("在吗")) return "在这里哦。今天想从哪件小事开始？";
-   if(t.Contains("生日")) return "我的资料上记着九月三日。能被朋友记住，也是很开心的事呀。";
+   if(t.Contains("生日")) return "九月三日，是我作为人入职管理局的纪念日哦。不过和朋友一起庆祝，哪天也不错吧？";
    return "留言收到。我把它当作今天的一次小小联络。也可以写进便签，留给未来的自己。";
   }
+  /// <summary>单独出现的 Y（前后不是英文字母），避免把 you、type 这类单词当成她。</summary>
+  static bool MentionsY(string text) {
+   for(int i=0;i<text.Length;i++) {
+    if(text[i]!='y') continue;
+    bool left=i==0||!IsAsciiLetter(text[i-1]);
+    bool right=i==text.Length-1||!IsAsciiLetter(text[i+1]);
+    if(left&&right) return true;
+   }
+   return false;
+  }
+  static bool IsAsciiLetter(char c) {return (c>='a'&&c<='z')||(c>='A'&&c<='Z');}
  }
 }

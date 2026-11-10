@@ -1,4 +1,4 @@
-# 指向本机绝对路径的快捷方式，克隆后无效
+﻿# 指向本机绝对路径的快捷方式，克隆后无效
 启动曳尔沐.lnk
 
 # 编辑器与构建中间产物
@@ -33,3 +33,23 @@ vendor/qrcoder/\[Content_Types\].xml
 vendor/qrcoder/_rels/
 vendor/qrcoder/lib/
 vendor/qrcoder/package/
+
+# Isolated build, test, preview and release output
+artifacts/
+
+# 本机临时 UI 调试构建（不作为部署入口）
+dist/ElymsPet.UI.exe*
+dist/ElymsPet.Warm.exe*
+dist/ElymsPet.Tests.exe*
+
+# 运行时私有数据与凭据
+.env
+.env.*
+!.env.example
+bili-account.dat
+dsh-bridge.json
+error.log
+chat-history.json
+memories.json
+autonomy-journal.json
+archives.json

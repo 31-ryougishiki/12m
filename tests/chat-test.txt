@@ -2,14 +2,13 @@
 model=deepseek-flash
 base=https://api.deepseek.com
 key=sk-…023e (来源：设置文件)
-seconds=1.77
+seconds=1.61
 status=200
-tokens=864+110
+tokens=1749+63
 thinking=on
-prompt=今天下午想喝咖啡，推荐点什么
-memory=记忆可用。你记得的事：
-- 11-07 偏好｜只喝冰美式，不加糖
-reply=冰美式，不加糖，这条我缓存里存着呢，直接照单来电最稳。要是下午想来点变化，可以试试冷萃或者加一份浓缩，还是走无糖路线；我就先不给你推拿铁了，免得糖分偷偷混进信号里。
+prompt=卡厄斯呢？
+memory=记忆可用。你们还没有存下值得记的事。
+reply=卡厄斯啊，多半又在前线跑任务。我这儿看不到他的实时位置，等他回来我帮你问问？你找他有事？
 marker=no
 error=
 detail=

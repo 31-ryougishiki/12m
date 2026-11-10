@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -30,7 +31,7 @@ namespace ElymsPet {
    Children.Add(scroller);
    emptyPanel.HorizontalAlignment=HorizontalAlignment.Center;
    emptyPanel.Margin=new Thickness(0,compact?14:26,0,compact?14:26);
-   emptyPanel.Children.Add(new TextBlock{Text="信号已接通",FontSize=compact?10.5:11.5,Foreground=Theme.Brush("#7FC5B8"),HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,0,0,5)});
+   emptyPanel.Children.Add(new TextBlock{Text="信号已接通",FontSize=compact?10.5:11.5,Foreground=Theme.Brush("#447969"),HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,0,0,5)});
    emptyText=new TextBlock{Text="想说什么，直接写下来就好。",FontSize=compact?11:12,Foreground=Theme.TextDim,TextAlignment=TextAlignment.Center,TextWrapping=TextWrapping.Wrap,MaxWidth=compact?280:360};
    emptyPanel.Children.Add(emptyText);
    ShowEmpty("想说什么，直接写下来就好。");
@@ -63,12 +64,25 @@ namespace ElymsPet {
    if(line.Speaker==ChatSpeaker.Notice)return Notice(line.Text);
    bool mine=line.Speaker==ChatSpeaker.User;
    var block=new StackPanel{HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left,Margin=new Thickness(0,0,0,compact?9:11)};
-   var label=new TextBlock{FontSize=compact?9.5:10.5,Foreground=mine?Theme.Brush("#8FD9CB"):Theme.Lav,Margin=new Thickness(mine?0:2,mine?0:2,mine?2:0,3),HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left};
+   var label=new TextBlock{FontSize=compact?9.5:10.5,Foreground=mine?Theme.Brush("#447969"):Theme.Lav,Margin=new Thickness(mine?0:2,mine?0:2,mine?2:0,3),HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left};
    label.Inlines.Add(new Run(mine?"你":"曳尔沐"));
    var time=new Run("  "+line.Time.ToString("HH:mm")){Foreground=Theme.TextDim,FontSize=compact?8.5:9.5};
    label.Inlines.Add(time);
    block.Children.Add(label);
-   var text=new TextBlock{Text=line.Text,TextWrapping=TextWrapping.Wrap,FontSize=compact?12.5:13.5,LineHeight=compact?21:23,Foreground=mine?Theme.UserText:Theme.TextMain,MaxWidth=BubbleMaxWidth};
+   var text=new TextBox{
+    Text=line.Text,IsReadOnly=true,IsReadOnlyCaretVisible=false,AcceptsReturn=true,
+    TextWrapping=TextWrapping.Wrap,FontFamily=Theme.Font,FontSize=compact?12.5:13.5,
+    Foreground=mine?Theme.UserText:Theme.TextMain,
+    Background=Brushes.Transparent,BorderThickness=new Thickness(0),Padding=new Thickness(0),
+    MaxWidth=BubbleMaxWidth,MinWidth=0,MinHeight=0,IsTabStop=false,Cursor=Cursors.IBeam,
+    VerticalContentAlignment=VerticalAlignment.Top,FocusVisualStyle=null,
+    CaretBrush=Theme.Accent,SelectionBrush=Theme.Brush("#88E5B2C5"),
+    IsInactiveSelectionHighlightEnabled=true,SelectionOpacity=0.5,
+    HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,
+    VerticalScrollBarVisibility=ScrollBarVisibility.Disabled
+   };
+   TextOptions.SetTextFormattingMode(text,TextFormattingMode.Display);
+   text.ContextMenu=MessageMenu(text,line.Text);
    var bubble=new Border{
     Background=mine?Theme.UserBubble:Theme.HerBubble,
     BorderBrush=mine?Theme.UserBorder:Theme.HerBorder,
@@ -78,11 +92,7 @@ namespace ElymsPet {
     Child=text,
     HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left
    };
-   var menu=new ContextMenu{FontFamily=Theme.Font,FontSize=12};
-   var copy=new MenuItem{Header="复制这条消息"};
-   copy.Click+=delegate {try{Clipboard.SetText(line.Text);}catch{}};
-   menu.Items.Add(copy);
-   bubble.ContextMenu=menu;
+   bubble.ContextMenu=CopyMenu(line.Text);
    block.Children.Add(bubble);
    if(!string.IsNullOrEmpty(line.Meta)) {
     block.Children.Add(new TextBlock{Text=line.Meta,FontSize=compact?8.5:9.5,Foreground=Theme.TextDim,Margin=new Thickness(mine?0:3,3,mine?3:0,0),HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left});
@@ -92,8 +102,8 @@ namespace ElymsPet {
   UIElement Notice(string text) {
    bool source=(text??"").StartsWith("参考资料：",StringComparison.Ordinal);
    var border=new Border{
-    Background=Theme.Brush("#12FFFFFF"),
-    BorderBrush=Theme.Brush("#1EFFFFFF"),
+    Background=Theme.Brush("#F6EEE8"),
+    BorderBrush=Theme.Brush("#E7D6CE"),
     BorderThickness=new Thickness(1),
     CornerRadius=new CornerRadius(10),
     Padding=new Thickness(compact?9:11,compact?5:6,compact?10:12,compact?5:6),
@@ -101,27 +111,54 @@ namespace ElymsPet {
     HorizontalAlignment=source?HorizontalAlignment.Stretch:HorizontalAlignment.Center,
     Child=new TextBlock{Text=text,TextWrapping=TextWrapping.Wrap,TextAlignment=source?TextAlignment.Left:TextAlignment.Center,FontSize=compact?10:11,LineHeight=compact?16:18,Foreground=Theme.TextDim,MaxWidth=source?520:(compact?300:420)}
    };
-   var menu=new ContextMenu{FontFamily=Theme.Font,FontSize=12};
-   var copy=new MenuItem{Header="复制这条消息"};
-   copy.Click+=delegate {try{Clipboard.SetText(text??"");}catch{}};
+   var menu=MenuTheme.Create();
+   var copy=MenuTheme.Item("复制这条消息","\uE8C8",null);
+   copy.Click+=delegate {TryCopy(text??"");};
    menu.Items.Add(copy);
    border.ContextMenu=menu;
    return border;
+  }
+  static ContextMenu CopyMenu(string text) {
+   var menu=MenuTheme.Create();
+   var copy=MenuTheme.Item("复制这条消息","\uE8C8",null);
+   copy.Click+=delegate {TryCopy(text??"");};
+   menu.Items.Add(copy);
+   return menu;
+  }
+  internal static ContextMenu MessageMenu(TextBox box,string text) {
+   var menu=MenuTheme.Create();
+   var selected=MenuTheme.Item("复制选中","\uE8C8",null);
+   selected.Click+=delegate {if(box.SelectionLength>0)TryCopy(box.SelectedText);};
+   var all=MenuTheme.Item("复制整条","\uE8A5",null);
+   all.Click+=delegate {TryCopy(text??"");};
+   var selectAll=MenuTheme.Item("全选","\uE8B3",null);
+   selectAll.Click+=delegate {box.Focus();box.SelectAll();};
+   menu.Opened+=delegate {selected.IsEnabled=box.SelectionLength>0;};
+   menu.Items.Add(selected);menu.Items.Add(all);menu.Items.Add(new Separator());menu.Items.Add(selectAll);
+   return menu;
+  }
+  internal static bool TryCopy(string text) {
+   if(string.IsNullOrEmpty(text))return false;
+   for(int attempt=0;attempt<4;attempt++) {
+    try {Clipboard.SetText(text);return true;}
+    catch {if(attempt<3)Thread.Sleep(30);}
+   }
+   return false;
   }
  }
 
  /// <summary>渐变薄荷色的圆形发送键。</summary>
  public sealed class SendButton : Border {
-  static readonly Brush Rest=Theme.Grad("#BFF5EA","#7FE0CD",45);
-  static readonly Brush Hover=Theme.Grad("#D7FBF4","#96EAD8",45);
+  static readonly Brush Rest=Theme.Grad("#C87990","#AD506B",45);
+  static readonly Brush Hover=Theme.Grad("#D48BA0","#BF6C85",45);
   readonly Action send;
   bool ready;
   public SendButton(Action action,double size) {
    send=action;
    Width=size;Height=size;CornerRadius=new CornerRadius(size/2);
-   Background=Rest;BorderBrush=Theme.Brush("#66FFFFFF");BorderThickness=new Thickness(1);
+   Background=Rest;BorderBrush=Theme.Brush("#D29BAE");BorderThickness=new Thickness(1);
    ToolTip="发送（Enter）";
-   Child=new TextBlock{Text="↑",FontSize=size*.5,FontWeight=FontWeights.Bold,Foreground=Theme.Brush("#0E2A2E"),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center,TextAlignment=TextAlignment.Center};
+   Child=new TextBlock{Text="↑",FontSize=size*.5,FontWeight=FontWeights.Bold,Foreground=Theme.Brush("#FFFFFF"),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center,TextAlignment=TextAlignment.Center};
    MouseEnter+=delegate {if(ready)Background=Hover;};
    MouseLeave+=delegate {if(ready)Background=Rest;};
    MouseLeftButtonUp+=delegate(object sender,MouseButtonEventArgs e) {
@@ -145,15 +182,20 @@ namespace ElymsPet {
   public static TextBox Field() {
    var box=new TextBox{
     Background=Brushes.Transparent,BorderThickness=new Thickness(0),
-    Foreground=Theme.TextMain,CaretBrush=Theme.Mint,SelectionBrush=Theme.Brush("#558FE7CF"),
+    Foreground=Theme.TextMain,CaretBrush=Theme.Accent,SelectionBrush=Theme.Brush("#66E5B2C5"),
     FontFamily=Theme.Font,FontSize=13,TextWrapping=TextWrapping.Wrap,AcceptsReturn=true,
     MaxLength=4000,VerticalContentAlignment=VerticalAlignment.Center,FocusVisualStyle=null
    };
    TextOptions.SetTextFormattingMode(box,TextFormattingMode.Display);
+   box.ContextMenu=InputMenu(box);
    return box;
   }
+  static ContextMenu InputMenu(TextBox box) {
+   return MenuTheme.EditMenu(box);
+  }
+
   public static TextBlock Placeholder(TextBox box,string text,Thickness margin) {
-   var block=new TextBlock{Text=text,FontSize=12.5,Foreground=Theme.Brush("#7286A8"),Margin=margin,VerticalAlignment=VerticalAlignment.Center,IsHitTestVisible=false};
+   var block=new TextBlock{Text=text,FontSize=12.5,Foreground=Theme.Brush("#795F69"),Margin=margin,VerticalAlignment=VerticalAlignment.Center,IsHitTestVisible=false};
    TextChangedEventHandler update=delegate {block.Visibility=box.Text.Length==0?Visibility.Visible:Visibility.Collapsed;};
    box.TextChanged+=update;
    update(null,null);

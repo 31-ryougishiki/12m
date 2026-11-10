@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
@@ -23,8 +23,8 @@ namespace ElymsPet {
    Refresh();
   }
   UIElement Build() {
-   status=Ui.Text("",12,"#9FE5D7");
-   connection=Ui.Text("",11,"#8FA4C7");
+   status=Ui.Text("",12,"#447969");
+   connection=Ui.Text("",11,"#795F69");
    task=Ui.Input("",86);task.MaxLength=8000;task.AcceptsReturn=true;task.VerticalScrollBarVisibility=ScrollBarVisibility.Auto;task.VerticalContentAlignment=VerticalAlignment.Top;
    task.Resources.Add(typeof(System.Windows.Controls.Primitives.ScrollBar),Theme.ScrollBarStyle);
    task.ToolTip="写清楚要 DSH 做什么；可以直接说文件、目标、验收标准。";
@@ -34,24 +34,24 @@ namespace ElymsPet {
    cancel=Ui.Button("取消当前任务",delegate {dsh.Cancel();},false);
    test=Ui.Button("测试连接",delegate {connection.Text="正在检查 DSH 桥接…";dsh.TestConnection();},false);
    open=Ui.Button("打开 DSH",OpenDsh,false);
-   resultLabel=Ui.Text("当前任务",12,"#A6B5CF");
-   currentTitle=Ui.Text("还没有任务。",15,"#E7EDFC");
-   currentMeta=Ui.Text("",11,"#8FA4C7");
+   resultLabel=Ui.Text("当前任务",12,"#78616A");
+   currentTitle=Ui.Text("还没有任务。",15,"#4F3B43");
+   currentMeta=Ui.Text("",11,"#795F69");
    result=Ui.Input("",170);result.IsReadOnly=true;result.AcceptsReturn=true;result.VerticalScrollBarVisibility=ScrollBarVisibility.Auto;result.VerticalContentAlignment=VerticalAlignment.Top;result.FontSize=12.5;
    result.Resources.Add(typeof(System.Windows.Controls.Primitives.ScrollBar),Theme.ScrollBarStyle);
    historyList=new StackPanel();
    var head=Ui.Stack(
-    Ui.Text("DSH 工作台",18,"#E7EDFC"),
-    Ui.Text("把实际动手的任务交给 DSH agent：它会创建真实 DSH 会话、使用工具读写工作区，完成后把结论带回桌宠。写操作需要你确认。",12,"#A6B5CF"),
+    Ui.Text("DSH 工作台",18,"#4F3B43"),
+    Ui.Text("把实际动手的任务交给 DSH agent：它会创建真实 DSH 会话、使用工具读写工作区，完成后把结论带回桌宠。写操作需要你确认。",12,"#78616A"),
     status,connection,
     Ui.Row(test,open),
-    Ui.Text("任务内容",12,"#A6B5CF"),
+    Ui.Text("任务内容",12,"#78616A"),
     task,
     Ui.Row(start,cancel),
     fullAccess,
-    Ui.Text("没有勾选「完整访问」时使用工作区可写权限；某些命令/工具可能需要完整访问。DSH 收到的是任务描述，不会收到 API Key。",11,"#8FA4C7"));
+    Ui.Text("没有勾选「完整访问」时使用工作区可写权限；某些命令/工具可能需要完整访问。DSH 收到的是任务描述，不会收到 API Key。",11,"#795F69"));
    var current=Ui.Stack(resultLabel,currentTitle,currentMeta,result);
-   var recent=Ui.Stack(Ui.Text("最近任务",18,"#E7EDFC"),historyList);
+   var recent=Ui.Stack(Ui.Text("最近任务",18,"#4F3B43"),historyList);
    var root=new StackPanel();
    root.Children.Add(Ui.Card(head));
    root.Children.Add(Ui.Card(current));
@@ -111,12 +111,12 @@ namespace ElymsPet {
    }
    historyList.Children.Clear();
    DshJob[] history=dsh.History;
-   if(history.Length==0) historyList.Children.Add(Ui.Text("还没有完成的任务。",11,"#8FA4C7"));
+   if(history.Length==0) historyList.Children.Add(Ui.Text("还没有完成的任务。",11,"#795F69"));
    else {
     for(int i=history.Length-1;i>=0&&historyList.Children.Count<8;i--) {
      DshJob item=history[i];
      string line=StateIcon(item.Status)+"  "+DshApi.Clip(string.IsNullOrEmpty(item.Title)?item.Task:item.Title,42);
-     var row=Ui.Text(line,11,"#B8C8E5");
+     var row=Ui.Text(line,11,"#78616A");
      row.Margin=new Thickness(0,0,0,5);
      row.ToolTip=item.SessionId.Length>0?"DSH 会话 "+item.SessionId:"";
      historyList.Children.Add(row);

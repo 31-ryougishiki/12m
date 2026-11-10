@@ -60,9 +60,11 @@ namespace ElymsPet {
    string text=reply??"";
    int start=text.IndexOf(StartMarker,StringComparison.OrdinalIgnoreCase);
    if(start<0) {reply=text.Trim();return "";}
-   int end=text.IndexOf(EndMarker,start+StartMarker.Length,StringComparison.OrdinalIgnoreCase);
-   string task=end<0?text.Substring(start+StartMarker.Length):text.Substring(start+StartMarker.Length,end-start-StartMarker.Length);
-   string cleaned=end<0?text.Substring(0,start):text.Substring(0,start)+text.Substring(end+EndMarker.Length);
+   int bodyStart=start+StartMarker.Length;
+   int valueEnd,after;
+   bool closed=TagMarkers.FindClose(text,bodyStart,"DSH_TASK",out valueEnd,out after);
+   string task=closed?text.Substring(bodyStart,valueEnd-bodyStart):text.Substring(bodyStart);
+   string cleaned=closed?text.Substring(0,start)+text.Substring(after):text.Substring(0,start);
    reply=cleaned.Trim();
    task=task.Trim();
    if(task.Length>4000) task=task.Substring(0,4000)+"…";
@@ -74,101 +76,6 @@ namespace ElymsPet {
   }
  }
  /// <summary>桌宠侧 DSH 工作台：读握手文件、提交任务、轮询结果、取消。</summary>
- public sealed class DshWorkbench {
-  readonly PetWindow pet;
-  readonly DispatcherTimer timer;
-  readonly List<DshJob> history=new List<DshJob>();
-  bool polling;
-  public DshJob Current;
-  public string LastConnection="";
-  public event Action Changed;
-  public event Action<DshJob> Finished;
-  public event Action<bool,string> ConnectionChecked;
-  public DshWorkbench(PetWindow target) {
-   pet=target;
-   timer=new DispatcherTimer {Interval=TimeSpan.FromSeconds(1.5)};
-   timer.Tick+=delegate {Poll();};
-  }
-  public DshJob[] History {get {return history.ToArray();}}
-  public bool Busy {get {return Current!=null&&Current.Busy;}}
-  public string HandshakePath {get {return DshApi.HandshakePath;}}
-  public bool CanRun {get {string error;return pet.State.DshEnabled&&DshApi.ReadHandshake(out error)!=null;}}
-  public string StatusLine {
-   get {
-    if(!pet.State.DshEnabled) return "○ DSH 委托已关闭";
-    string error;var handshake=DshApi.ReadHandshake(out error);
-    if(handshake==null) return "○ DSH 桥接未运行（打开 DSH 后可用）";
-    return "● DSH 桥接在线 · 工作区 "+handshake.workspace;
-   }
-  }
-  public string PromptContext() {return DshApi.PromptContext(pet.State);}
-  public bool Start(string task,string permission,string title) {
-   if(Busy) return false;
-   task=(task??"").Trim();
-   if(task.Length==0) return false;
-   if(!pet.State.DshEnabled) {SetImmediateError("DSH 委托已在设置里关闭。");return false;}
-   string error;var handshake=DshApi.ReadHandshake(out error);
-   if(handshake==null) {SetImmediateError("DSH 桥接没有运行："+error);return false;}
-   Current=new DshJob {Status="starting",Task=task,Title=title??"",Permission=permission??"workspace-write",Cwd=handshake.workspace,UpdatedAt=DateTime.Now};
-   Raise();
-   Ui.InBackground(pet.Dispatcher,delegate {
-    return DshApi.Start(task,permission,DshApi.Clip(title,80));
-   },delegate(DshJob job) {
-    Current=job;
-    if(job==null) Current=new DshJob {Status="error",Error="DSH 返回了空结果",Task=task};
-    Raise();
-    if(Current.Busy) timer.Start(); else Finish(Current);
-   });
-   return true;
-  }
-  public void Cancel() {
-   if(Current==null||!Current.Busy||Current.Id.Length==0) return;
-   string id=Current.Id;
-   Ui.InBackground(pet.Dispatcher,delegate {return DshApi.Cancel(id);},delegate(bool ok) {
-    if(ok&&Current!=null&&Current.Id==id) {Current.Status="cancelling";Current.UpdatedAt=DateTime.Now;Raise();}
-   });
-  }
-  public void TestConnection() {
-   Ui.InBackground(pet.Dispatcher,delegate {return DshApi.Health();},delegate(DshHealthResult result) {
-    LastConnection=result.Ok?"● DSH 桥接正常 · 工作区 "+result.Workspace:("○ "+result.Error);
-    Raise();
-    if(ConnectionChecked!=null)ConnectionChecked(result.Ok,LastConnection);
-   });
-  }
-  void Poll() {
-   if(polling||Current==null||!Current.Busy||Current.Id.Length==0) {if(Current==null||!Current.Busy)timer.Stop();return;}
-   polling=true;
-   string id=Current.Id;
-   Ui.InBackground(pet.Dispatcher,delegate {return DshApi.Poll(id);},delegate(DshJob job) {
-    polling=false;
-    if(Current==null||Current.Id!=id) return;
-    DshJob previous=Current;
-    Current=job;
-    if(Current.Id.Length==0) {
-     Current.Id=id;Current.Task=previous.Task;Current.Permission=previous.Permission;Current.Cwd=previous.Cwd;Current.Title=previous.Title;
-    }
-    Raise();
-    if(Current.Busy) timer.Start(); else Finish(Current);
-   });
-  }
-  void Finish(DshJob job) {
-   timer.Stop();
-   if(job==null) return;
-   job.UpdatedAt=DateTime.Now;
-   bool exists=false;
-   for(int i=0;i<history.Count;i++)if(history[i].Id==job.Id)exists=true;
-   if(!exists&&job.Id.Length>0) {history.Add(job);while(history.Count>12)history.RemoveAt(0);}
-   Raise();
-   if(Finished!=null)Finished(job);
-  }
-  void SetImmediateError(string error) {
-   Current=new DshJob {Status="error",Error=error,UpdatedAt=DateTime.Now};
-   Raise();
-   if(Finished!=null)Finished(Current);
-  }
-  void Raise() {if(Changed!=null)Changed();}
-  public void Dispose() {timer.Stop();}
- }
  /// <summary>本机 DSH 桥接的 HTTP 客户端；只连 127.0.0.1，带握手里的随机 token。</summary>
  public static class DshApi {
   public const string HandshakeFile="dsh-bridge.json";

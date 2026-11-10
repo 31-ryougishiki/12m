@@ -1,7 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
-using System.Windows;
 
 namespace ElymsPet {
  public enum ChatSpeaker { User, Elyms, Notice }
@@ -31,9 +30,18 @@ namespace ElymsPet {
  }
 
  /// <summary>一段共享的对话：陪伴面板和浮动输入框都读写这里，保证两窗口看到同一段聊天。</summary>
- public sealed class ChatService {
-  readonly PetWindow pet;
-  readonly ChatSession session=new ChatSession();
+ public sealed class ChatService : IDisposable {
+  readonly PetState state;
+  readonly WorkScope work;
+  readonly DshWorkbench dsh;
+  readonly BiliService bili;
+  readonly MemoryService memory;
+  readonly ChatSession session;
+  readonly Func<string> profileDigest;
+  readonly Func<string,string> retrieveProfile;
+  readonly Func<string, bool> confirmDsh;
+  readonly PetFeedback feedback;
+  readonly IClock clock;
   readonly List<ChatLine> lines=new List<ChatLine>();
   bool busy;
   string pendingBiliUser="";
@@ -41,6 +49,7 @@ namespace ElymsPet {
   public string LastMeta="待命";
   sealed class WebRun {
    public string User="";
+   public string Memory="";
    public string Initial="";
    public string Intent="";
    public bool Fetch;
@@ -55,22 +64,26 @@ namespace ElymsPet {
   public event Action<ChatLine> LineAdded;
   public event Action Changed;
   public event Action Cleared;
-  public ChatService(PetWindow target) {
-   pet=target;
+  public ChatService(PetState state, IWorkScheduler scheduler, DshWorkbench dsh, BiliService bili,
+   MemoryService memory, ChatSession session, Func<string> profileDigest, PetFeedback feedback,
+   Func<string, bool> confirmDsh, IClock clock, bool preview, Func<string,string> retrieveProfile=null) {
+   this.state=state; this.dsh=dsh; this.bili=bili; this.memory=memory; this.session=session;
+   this.retrieveProfile=retrieveProfile;this.profileDigest=profileDigest; this.feedback=feedback; this.confirmDsh=confirmDsh; this.clock=clock;
+   work=new WorkScope(scheduler,OnFailure,!preview);
    session.Load();
    ChatTurn[] history=session.History;
    for(int i=0;i<history.Length;i++) {
     lines.Add(new ChatLine(history[i].Role=="assistant"?ChatSpeaker.Elyms:ChatSpeaker.User,history[i].Content,"历史上下文"));
    }
    while(lines.Count>200)lines.RemoveAt(0);
-   pet.Dsh.Finished+=OnDshFinished;
-   pet.Bili.Finished+=OnBiliFinished;
+   dsh.Finished+=OnDshFinished;
+   bili.Finished+=OnBiliFinished;
   }
   public bool Busy {get {return busy;}}
   public int ContextTokens {get {return session.ContextTokens;}}
   public int ContextLimit {get {return session.ContextLimit;}}
   public string ContextLabel {
-   get {return "上下文 "+ContextTokens.ToString("N0")+" / 1,000,000 tokens · 已持久化";}
+   get {return "上下文 "+ContextTokens.ToString("N0")+" / 1,000,000 tokens · "+(session.LastError.Length==0?"已持久化":"保存失败，请检查数据文件夹");}
   }
   public ChatTurn[] RecentTurns(int count) {return session.Recent(count);}
   public string RecentContext(int count) {
@@ -84,20 +97,22 @@ namespace ElymsPet {
   }
   public ChatLine[] Lines {get {return lines.ToArray();}}
   public void Send(string raw) {
+   if(work.IsDisposed)return;
    if(busy) {Add(new ChatLine(ChatSpeaker.Notice,"正在等曳尔沐回复，这句话稍后再发吧。",""));return;}
    string text=(raw??"").Trim();
    if(text.Length==0) return;
    if(text.Length>4000) text=text.Substring(0,4000);
-   if(pet.State.Sleeping) {pet.State.Sleeping=false;pet.Save();}
+   feedback.Wake();
    Add(new ChatLine(ChatSpeaker.User,text,""));
-   ApiKey.State key=ApiKey.Resolve(pet.State);
-   if(!pet.State.AiChat) {Offline(text,"在线 AI 已关闭，这次先用离线对白陪你。");return;}
+   ApiKey.State key=ApiKey.Resolve(state);
+   if(!state.AiChat) {Offline(text,"在线 AI 已关闭，这次先用离线对白陪你。");return;}
    if(!key.Configured) {Offline(text,"还没有配置 API Key。在「设置」里接入 DeepSeek，就能在线聊天。");return;}
+   string memoryContext=memory.Recall(text);
    string biliQuery;
    if(TryBiliCommand(text,out biliQuery)) {
     busy=true;pendingBiliUser=text;LastHint="正在B站逛逛…";LastMeta=LastHint;
     Add(new ChatLine(ChatSpeaker.Notice,biliQuery.Length>0?"我去B站逛逛「"+WebTask.Clip(biliQuery,36)+"」…":"我去B站随便逛逛，看看能刷到什么…",""));
-    if(!pet.Bili.Browse(biliQuery,true)) {
+    if(!bili.Browse(biliQuery,true)) {
      busy=false;pendingBiliUser="";
      Add(new ChatLine(ChatSpeaker.Notice,"B站这一趟还没结束，等它逛完再试。",""));
     }
@@ -106,30 +121,29 @@ namespace ElymsPet {
    }
    string command;bool commandFetch;
    if(TryWebCommand(text,out command,out commandFetch)) {
-    if(!pet.State.WebEnabled) {Offline(text,"联网搜索在设置里关闭了；到「设置 → AI 对话」打开后，我就能帮你查。");return;}
+    if(!state.WebEnabled) {Offline(text,"联网搜索在设置里关闭了；到「设置 → AI 对话」打开后，我就能帮你查。");return;}
     busy=true;LastHint=commandFetch?"正在读取网页…":"正在联网搜索…";LastMeta=LastHint;Raise();
-    var run=new WebRun {User=text,Intent=command,Fetch=commandFetch};
+    var run=new WebRun {User=text,Memory=memoryContext,Intent=command,Fetch=commandFetch};
     RunWebStep(run);
     return;
    }
    bool autoFetch;string autoValue;
-   if(pet.State.WebEnabled&&WebApi.NeedsFreshInfo(text,out autoFetch,out autoValue)) {
+   if(state.WebEnabled&&WebApi.NeedsFreshInfo(text,out autoFetch,out autoValue)) {
     busy=true;LastHint=autoFetch?"正在读取网页…":"正在联网搜索…";LastMeta=LastHint;Raise();
     Add(new ChatLine(ChatSpeaker.Notice,autoFetch?"这句话提到一个网页，我先读取正文再回答。":"这句话可能需要最新信息，我先联网查一下。",""));
-    var autoRun=new WebRun {User=text,Intent=autoValue,Fetch=autoFetch,Announced=true};
+    var autoRun=new WebRun {User=text,Memory=memoryContext,Intent=autoValue,Fetch=autoFetch,Announced=true};
     RunWebStep(autoRun);
     return;
    }
-   session.MemoryContext=pet.Memory==null?"":pet.Memory.Recall(text);
-   ChatTurn[] turns=session.Build(pet.State,text,pet.ProfileDigest,pet.Dsh.PromptContext(),WebApi.PromptContext(pet.State));
-   string baseUrl=pet.State.ApiBase,model=pet.State.ApiModel;
+   ChatTurn[] turns=BuildTurns(text,memoryContext,"");
+   string baseUrl=state.ApiBase,model=state.ApiModel;
    // 聊天固定开启思考；不再依赖旧设置里的“深度思考”开关。
    busy=true;LastHint="正在接通 DeepSeek，先想一想…";LastMeta=LastHint;Raise();
-   pet.Act(6,"正在想一想，稍等一下…",20);
+   feedback.Act(6,"正在想一想，稍等一下…",20);
    int timeout=session.ContextTokens>100000?120:45;
-   Ui.InBackground(pet.Dispatcher,delegate {
+   work.Run(delegate {
     return DeepSeek.Complete(key.Key,baseUrl,model,true,turns,timeout);
-   },delegate(ChatOutcome outcome) {Finish(text,outcome);});
+   },delegate(ChatOutcome outcome) {Finish(text,outcome,memoryContext);});
   }
   static bool TryWebCommand(string text,out string value,out bool fetch) {
    value="";fetch=false;
@@ -157,9 +171,9 @@ namespace ElymsPet {
   }
   void OnBiliFinished(BiliBrowseResult result) {
    if(result==null||!result.FromChat)return;
-   busy=false;pet.AiBusy=false;
+   busy=false;
    if(!result.Ok) {
-    Add(new ChatLine(ChatSpeaker.Notice,"B站没有逛成："+ChatText.Clip(result.Error,180),"")); 
+    Add(new ChatLine(ChatSpeaker.Notice,"B站没有逛成："+ChatText.Clip(result.Error,180),""));
     string fallback="这次没能在B站逛下去。等网络或B站风控缓一缓，再让我去试试。";
     session.Remember(pendingBiliUser,fallback);
     Add(new ChatLine(ChatSpeaker.Elyms,fallback,"B站 · 未完成"));
@@ -174,7 +188,7 @@ namespace ElymsPet {
    if(result.Selected!=null) Add(new ChatLine(ChatSpeaker.Notice,"她停在这里：\n"+result.Selected.Title+"\n"+result.Selected.Url,""));
    session.Remember(pendingBiliUser,result.Summary);
    LastHint=meta;LastMeta=meta;
-   pet.Act(6,ChatText.Clip(result.Summary,120),ChatText.SecondsFor(result.Summary));
+   feedback.Act(6,ChatText.Clip(result.Summary,120),ChatText.SecondsFor(result.Summary));
    pendingBiliUser="";
    Raise();
   }
@@ -197,48 +211,48 @@ namespace ElymsPet {
    Add(new ChatLine(ChatSpeaker.Elyms,text,meta??"自主活动"));
    session.RememberAssistant(text);
    LastHint=meta??"自主活动";LastMeta=LastHint;
-   pet.Act(6,ChatText.Clip(text,120),ChatText.SecondsFor(text));
+   feedback.Act(6,ChatText.Clip(text,120),ChatText.SecondsFor(text));
    Raise();
   }
   public void AddAutonomyNotice(string text) {
    if(!string.IsNullOrEmpty(text)) Add(new ChatLine(ChatSpeaker.Notice,text,""));
   }
-  void Finish(string user,ChatOutcome outcome) {
+  void Finish(string user,ChatOutcome outcome,string memoryContext) {
    if(outcome==null||!outcome.Ok) {Offline(user,outcome==null?"这次没有收到回复。":outcome.Error);return;}
    string reply=outcome.Text;
    string dshTask=DshTask.Extract(ref reply);
    WebIntent web=WebTask.Extract(ref reply);
    MemoryItem[] memories=MemoryMarkers.Extract(ref reply);
-   int remembered=(pet.Memory==null||memories.Length==0)?0:pet.Memory.Remember(memories);
+   int remembered=(memory==null||memories.Length==0)?0:memory.Remember(memories);
    if(web.Present&&dshTask.Length==0) {
-    if(pet.State.WebEnabled) {
+    if(state.WebEnabled) {
      if(reply.Length>0) Add(new ChatLine(ChatSpeaker.Elyms,reply,"DeepSeek · 准备联网…"));
-     var run=new WebRun {User=user,Initial=reply,Intent=web.Value,Fetch=web.Fetch};
+     var run=new WebRun {User=user,Memory=memoryContext,Initial=reply,Intent=web.Value,Fetch=web.Fetch};
      run.Seconds=outcome.Seconds;run.CompletionTokens=outcome.CompletionTokens;
      RunWebStep(run);
      return;
     }
     Add(new ChatLine(ChatSpeaker.Notice,"联网搜索在设置里关闭了，这次先不查网页。",""));
    }
-   busy=false;pet.AiBusy=false;
+   busy=false;
    if(reply.Length==0)reply=remembered>0?"嗯，这件事我记下了。":(dshTask.Length>0?"好，我把这件事放到 DSH 工作台，等你确认。":(web.Present?"联网搜索关闭了，这次没有查到网页资料。":outcome.Text));
    session.Remember(user,reply);
    string meta="DeepSeek · "+outcome.Seconds.ToString("0.0")+"s · "+outcome.CompletionTokens+" tokens";
    Add(new ChatLine(ChatSpeaker.Elyms,reply,meta));
-   if(remembered>0) Add(new ChatLine(ChatSpeaker.Notice,"记住了一条："+MemoryStore.Summarize(memories),"")); 
+   if(remembered>0) Add(new ChatLine(ChatSpeaker.Notice,"记住了一条："+MemoryStore.Summarize(memories),""));
    LastHint=meta;LastMeta=meta;
-   pet.Act(6,ChatText.Clip(reply,120),ChatText.SecondsFor(reply));
+   feedback.Act(6,ChatText.Clip(reply,120),ChatText.SecondsFor(reply));
    if(dshTask.Length>0)HandleDshProposal(dshTask);
    Raise();
   }
   void Offline(string user,string hint) {
-   busy=false;pet.AiBusy=false;
+   busy=false;
    string local=Dialogue.Reply(user);
    session.Remember(user,local);
    Add(new ChatLine(ChatSpeaker.Notice,hint,""));
    Add(new ChatLine(ChatSpeaker.Elyms,local,"离线对白"));
    LastHint=hint;LastMeta="离线对白";
-   pet.Act(6,ChatText.Clip(local,120),ChatText.SecondsFor(local));
+   feedback.Act(6,ChatText.Clip(local,120),ChatText.SecondsFor(local));
    Raise();
   }
   void RunWebStep(WebRun run) {
@@ -250,10 +264,10 @@ namespace ElymsPet {
     Add(new ChatLine(ChatSpeaker.Notice,run.Fetch?"正在读取网页资料，稍等一下…":"正在联网搜索「"+WebTask.Clip(run.Intent,40)+"」，稍等一下…",""));
    }
    Raise();
-   pet.Act(6,run.Fetch?"正在打开网页取资料…":"正在联网找资料…",25);
-   string key=ApiKey.Resolve(pet.State).Key,baseUrl=pet.State.ApiBase;
-   string intent=run.Intent;bool fetch=run.Fetch;bool needContent=pet.State.WebNeedContent;
-   Ui.InBackground(pet.Dispatcher,delegate {
+   feedback.Act(6,run.Fetch?"正在打开网页取资料…":"正在联网找资料…",25);
+   string key=ApiKey.Resolve(state).Key,baseUrl=state.ApiBase;
+   string intent=run.Intent;bool fetch=run.Fetch;bool needContent=state.WebNeedContent;
+   work.Run(delegate {
     return fetch?WebApi.Fetch(key,baseUrl,intent,30):WebApi.Search(key,baseUrl,intent,5,needContent,30);
    },delegate(WebOutcome outcome) {OnWebOutcome(run,outcome);});
   }
@@ -266,12 +280,11 @@ namespace ElymsPet {
    else if(outcome.Results!=null) run.Seen.AddRange(outcome.Results);
    run.Evidence+=WebApi.ModelEvidence(run.Intent,outcome);
    Add(new ChatLine(ChatSpeaker.Notice,outcome.Kind==WebKind.Fetch?"已读取网页正文 · 正在整理…":"已取回 "+outcome.SourceCount+" 条公开网页资料 · 正在整理…",""));
-   string prompt=WebApi.BuildAnswerPrompt(run.User,run.Evidence);
-   ChatTurn[] turns=session.Build(pet.State,prompt,pet.ProfileDigest,pet.Dsh.PromptContext(),WebApi.PromptContext(pet.State));
-   string key=ApiKey.Resolve(pet.State).Key,baseUrl=pet.State.ApiBase,model=pet.State.ApiModel;
+   ChatTurn[] turns=BuildTurns(run.User,run.Memory,run.Evidence);
+   string key=ApiKey.Resolve(state).Key,baseUrl=state.ApiBase,model=state.ApiModel;
    LastHint="正在整理联网结果…";LastMeta=LastHint;Raise();
-   pet.Act(6,"资料拿到了，我来整理一下…",25);
-   Ui.InBackground(pet.Dispatcher,delegate {
+   feedback.Act(6,"资料拿到了，我来整理一下…",25);
+   work.Run(delegate {
     return DeepSeek.Complete(key,baseUrl,model,true,turns,60,1600,0.4);
    },delegate(ChatOutcome outcome2) {FinishWeb(run,outcome2);});
   }
@@ -282,21 +295,21 @@ namespace ElymsPet {
    DshTask.Extract(ref reply);
    WebIntent next=WebTask.Extract(ref reply);
    MemoryItem[] memories=MemoryMarkers.Extract(ref reply);
-   if(memories.Length>0&&pet.Memory!=null)pet.Memory.Remember(memories);
-   if(next.Present&&run.Steps<2&&pet.State.WebEnabled) {
+   if(memories.Length>0&&memory!=null)memory.Remember(memories);
+   if(next.Present&&run.Steps<2&&state.WebEnabled) {
     run.Intent=next.Value;run.Fetch=next.Fetch;
     Add(new ChatLine(ChatSpeaker.Notice,next.Fetch?"再读取一个网页核对一下…":"再补查一条资料…",""));
     RunWebStep(run);
     return;
    }
-   busy=false;pet.AiBusy=false;
+   busy=false;
    if(reply.Length==0)reply="资料已经取回，但这次没能整理成回答。可以到「联网」页打开原始网页看看。";
    session.Remember(run.User,reply);
    AddWebSources(run,reply);
    string meta="DeepSeek + 联网 · "+run.Seconds.ToString("0.0")+"s · 检索 "+run.Sources+" 条";
    Add(new ChatLine(ChatSpeaker.Elyms,reply,meta));
    LastHint=meta;LastMeta=meta;
-   pet.Act(6,ChatText.Clip(reply,120),ChatText.SecondsFor(reply));
+   feedback.Act(6,ChatText.Clip(reply,120),ChatText.SecondsFor(reply));
    Raise();
   }
   void AddWebSources(WebRun run,string reply) {
@@ -312,8 +325,8 @@ namespace ElymsPet {
    if(text.Length>0) Add(new ChatLine(ChatSpeaker.Notice,"参考资料：\n"+text,""));
   }
   void FailWeb(WebRun run,string error) {
-   busy=false;pet.AiBusy=false;
-   Add(new ChatLine(ChatSpeaker.Notice,"联网没有完成："+ChatText.Clip(error,180),"")); 
+   busy=false;
+   Add(new ChatLine(ChatSpeaker.Notice,"联网没有完成："+ChatText.Clip(error,180),""));
    string fallback=(run.Initial??"").Trim();
    if(fallback.Length==0) {
     fallback="这次没有查到可用的资料。可以换个关键词，或者稍后再试。";
@@ -321,32 +334,30 @@ namespace ElymsPet {
    }
    session.Remember(run.User,fallback);
    LastHint="联网没有完成";LastMeta="联网未完成";
-   pet.Act(6,"这次联网没有接通，稍后再试试。",6);
+   feedback.Act(6,"这次联网没有接通，稍后再试试。",6);
    Raise();
   }
   void HandleDshProposal(string task) {
    task=(task??"").Trim();
    if(task.Length==0)return;
-   if(!pet.State.DshEnabled) {Add(new ChatLine(ChatSpeaker.Notice,"DSH 委托在设置里关闭了，这次先不实际动手。",""));return;}
+   if(!state.DshEnabled) {Add(new ChatLine(ChatSpeaker.Notice,"DSH 委托在设置里关闭了，这次先不实际动手。",""));return;}
    string error;var handshake=DshApi.ReadHandshake(out error);
    if(handshake==null) {Add(new ChatLine(ChatSpeaker.Notice,"DSH 工作台没有运行，等打开 DSH 后我再把这件事交过去。",""));return;}
-   string permission=pet.State.DshFullAccess?"danger-full-access":"workspace-write";
-   bool run=pet.State.DshAutoRun;
+   string permission=state.DshFullAccess?"danger-full-access":"workspace-write";
+   bool run=state.DshAutoRun;
    if(!run) {
     string warning=permission=="danger-full-access"?"DSH 会获得完整访问权限，可以执行命令、修改工作区。":"DSH 会在工作区里读写文件。";
     string message="曳尔沐想把这件事交给 DSH 工作台：\n\n"+DshTask.Clip(task,600)+"\n\n"+warning+"\n现在执行吗？";
-    Window owner=pet.Panel==null?(Window)pet:pet.Panel;
-    MessageBoxResult result=MessageBox.Show(owner,message,"DSH 工作台",MessageBoxButton.YesNo,MessageBoxImage.Question);
-    run=result==MessageBoxResult.Yes;
+    run=confirmDsh(message);
    }
    if(!run) {Add(new ChatLine(ChatSpeaker.Notice,"好，先不做。想执行时可以在「DSH 工作台」里手动提交。",""));return;}
    string title="曳尔沐 · "+DshTask.Clip(task.Replace("\r"," ").Replace("\n"," "),28);
-   if(pet.Dsh.Start(task,permission,title)) {
+   if(dsh.Start(task,permission,title)) {
     Add(new ChatLine(ChatSpeaker.Notice,"已交给 DSH 工作台（"+(permission=="danger-full-access"?"完整访问":"工作区可写")+"），完成后我把结果带回来。",""));
     LastHint="DSH 任务已提交，等待结果…";LastMeta=LastHint;Raise();
-    pet.Say("正在把这件事交给 DSH…",8);
+    feedback.Say("正在把这件事交给 DSH…",8);
    } else {
-    Add(new ChatLine(ChatSpeaker.Notice,"没能交给 DSH："+(pet.Dsh.Current==null?"DSH 没有运行":pet.Dsh.Current.Error),"")); 
+    Add(new ChatLine(ChatSpeaker.Notice,"没能交给 DSH："+(dsh.Current==null?"DSH 没有运行":dsh.Current.Error),""));
    }
   }
   void OnDshFinished(DshJob job) {
@@ -358,13 +369,13 @@ namespace ElymsPet {
     Add(new ChatLine(ChatSpeaker.Notice,"DSH 任务完成 · "+job.Seconds.ToString("0.0")+"s · 工具 "+job.Tools+" 次",""));
     Add(new ChatLine(ChatSpeaker.Elyms,DshTask.Clip(text,1200),meta));
     session.Remember("（DSH 任务）"+job.Task,"（DSH 结果）"+DshTask.Clip(text,1500));
-    pet.Act(6,DshTask.Clip(text,120),ChatText.SecondsFor(text));
+    feedback.Act(6,DshTask.Clip(text,120),ChatText.SecondsFor(text));
     LastHint=meta;LastMeta=meta;
    } else if(job.Status=="cancelled") {
     Add(new ChatLine(ChatSpeaker.Notice,"DSH 任务已取消。",""));
     LastHint="DSH 任务已取消";LastMeta=LastHint;
    } else {
-    Add(new ChatLine(ChatSpeaker.Notice,"DSH 任务没有完成："+(string.IsNullOrEmpty(job.Error)?"未知错误":job.Error),"")); 
+    Add(new ChatLine(ChatSpeaker.Notice,"DSH 任务没有完成："+(string.IsNullOrEmpty(job.Error)?"未知错误":job.Error),""));
     LastHint="DSH 任务没有完成";LastMeta=LastHint;
    }
    Raise();
@@ -374,6 +385,17 @@ namespace ElymsPet {
    if(lines.Count>200)lines.RemoveAt(0);
    if(LineAdded!=null)LineAdded(line);
    Raise();
+  }
+  ChatTurn[] BuildTurns(string user,string recalled,string evidence) {
+   return session.Build(new ConversationRequest(state,user,retrieveProfile==null?profileDigest():retrieveProfile(user),dsh.PromptContext(),WebApi.PromptContext(state),recalled,evidence,clock.Now));
+  }
+  void OnFailure(string error) {
+   busy=false; pendingBiliUser=""; LastHint=error; LastMeta="未完成";
+   Add(new ChatLine(ChatSpeaker.Notice,error,""));
+  }
+  public void Dispose() {
+   work.Dispose(); busy=false;
+   dsh.Finished-=OnDshFinished; bili.Finished-=OnBiliFinished;
   }
   void Raise() {if(Changed!=null)Changed();}
  }

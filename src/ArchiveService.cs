@@ -1,11 +1,16 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 
 namespace ElymsPet {
  /// <summary>存档单元的共享逻辑：陪伴面板和浮动输入框读写同一份存档，访谈与整理只在这里跑一份。</summary>
- public sealed class ArchiveService {
-  readonly PetWindow pet;
+ public sealed class ArchiveService : IDisposable {
+  readonly PetState state;
+  readonly bool preview;
+  readonly PetFeedback feedback;
+  readonly WorkScope work;
+  readonly IRepository<ArchiveBook> repository;
+  public string Digest {get;private set;}
   readonly ArchiveBook book;
   ArchiveSlot slot;
   bool busy;
@@ -13,13 +18,14 @@ namespace ElymsPet {
   string pendingAnswer="";
   int turnRevision,profileRevision,slotRevision;
   public event Action Changed;
-  public ArchiveService(PetWindow target) {
-   pet=target;
-   book=pet.IsPreview?ArchiveStore.Demo():ArchiveStore.Load();
+  public ArchiveService(PetState state,IWorkScheduler scheduler,PetFeedback feedback,IRepository<ArchiveBook> repository,bool preview) {
+   this.preview=preview;this.state=state;this.feedback=feedback;this.repository=repository;
+   work=new WorkScope(scheduler,delegate(string error) {busy=false;busyTitle="";status=error;Raise();},!preview);
+   book=ArchiveStore.Normalize(repository.Load());
    slot=ArchiveStore.Active(book);
    status=slot!=null&&slot.Turns.Count==0?"还没有访谈记录。点「提问」开始，或者直接回答她的问题。":"准备好继续上次的访谈。";
    UpdateDigest();
-   if(!pet.IsPreview) ArchiveStore.Save(book);
+   Save();
   }
   public ArchiveBook Book {get {return book;}}
   public ArchiveSlot Slot {get {return slot;}}
@@ -40,9 +46,10 @@ namespace ElymsPet {
    }
   }
   public void Notify(string text) {status=text==null?"":text;notice="";Raise();}
-  public void Save() {
-   if(pet.IsPreview) return;
-   if(!ArchiveStore.Save(book)) {status="保存失败："+ArchiveStore.LastError;Raise();}
+  public bool Save() {
+   if(!repository.Save(ArchiveStore.Normalize(book))) {status="保存失败："+repository.LastError;Raise();return false;}
+   if(!preview&&slot!=null)try {ArchiveKnowledge.WriteFiles(slot);}catch(Exception e){status="存档已保存，但知识库文件同步失败，可重试："+e.Message;Raise();}
+   return true;
   }
   public bool Select(ArchiveSlot target) {
    if(target==null||busy) return false;
@@ -67,22 +74,24 @@ namespace ElymsPet {
   public bool Delete() {
    if(slot==null||busy) return false;
    if(book.Slots.Count<=1) {status="至少保留一个存档。";Raise();return false;}
-   string old=slot.Name;
+   string old=slot.Name;var removed=slot;
    ArchiveStore.Delete(book,slot.Id);
    slot=ArchiveStore.Active(book);
    notice="";status="已删除「"+old+"」，当前是「"+slot.Name+"」。";
-   Save();TouchAll();return true;
+   if(Save()&&!preview)try {ArchiveKnowledge.RemoveFiles(removed);}catch(Exception e){status="存档已删除，但派生文件清理失败："+e.Message;}
+   TouchAll();return true;
   }
   public bool DeleteItem(ArchiveItem item) {
    if(slot==null||item==null||busy) return false;
    if(!slot.Items.Remove(item)) return false;
+   slot.Changes.RemoveAll(delegate(ArchiveChange c){return (c.Before!=null&&c.Before.Id==item.Id)||(c.After!=null&&c.After.Id==item.Id);});
    slot.Updated=DateTime.UtcNow;
    notice="已从画像里删掉「"+item.Title+"」。";status=notice;
    Save();profileRevision++;UpdateDigest();Raise();return true;
   }
   public void ClearProfile() {
    if(slot==null||busy||slot.Items.Count==0) return;
-   slot.Items.Clear();slot.Summary="";slot.Updated=DateTime.UtcNow;
+   slot.Items.Clear();slot.Changes.Clear();slot.Summary="";slot.Updated=DateTime.UtcNow;
    notice="画像已清空。";status=notice;
    Save();profileRevision++;UpdateDigest();Raise();
   }
@@ -94,20 +103,21 @@ namespace ElymsPet {
   }
   public void EnsureQuestion() {
    if(slot==null||busy) return;
-   if(HasPendingAsk()) return;
+   if(HasPendingAsk()||slot.Paused) return;
    AskNext();
   }
   public void AskNext() {
    if(slot==null||busy) return;
-   if(HasPendingAsk()) {status="上一条问题还没有回答。先回答它，或清空访谈记录重来。";Raise();return;}
-   if(!pet.State.AiChat) {status="出题需要接通在线 AI：请在「设置 → AI 对话」里启用在线 AI。";busyTitle="";Raise();return;}
-   ApiKey.State key=ApiKey.Resolve(pet.State);
+   slot.Paused=false;
+   if(HasPendingAsk()) {Save();status="上一条问题还没有回答。可以继续回答，也可以跳过或切换主题。";Raise();return;}
+   if(!state.AiChat) {status="出题需要接通在线 AI：请在「设置 → AI 对话」里启用在线 AI。";busyTitle="";Raise();return;}
+   ApiKey.State key=ApiKey.Resolve(state);
    if(!key.Configured) {status="出题需要 DeepSeek API Key：请在「设置 → AI 对话」里配置。";busyTitle="";Raise();return;}
    ChatTurn[] turns=ArchiveInterview.BuildQuestion(slot);
-   string baseUrl=pet.State.ApiBase,model=pet.State.ApiModel;
+   string baseUrl=state.ApiBase,model=state.ApiModel;
    busy=true;busyTitle="正在想下一个问题…";status=busyTitle;notice="";
    Raise();
-   Ui.InBackground(pet.Dispatcher,delegate {
+   work.Run(delegate {
     return DeepSeek.Complete(key.Key,baseUrl,model,false,turns,30,180,0.8);
    },delegate(ChatOutcome outcome) {FinishQuestion(outcome);});
   }
@@ -130,23 +140,24 @@ namespace ElymsPet {
    if(slot==null||busy) return false;
    string text=(raw==null?"":raw).Trim();
    if(text.Length==0) return false;
+   if(slot.Paused){Notify("访谈已暂停，请先继续访谈。");return false;}
    if(text.Length>2000) text=text.Substring(0,2000);
    if(!HasPendingAsk()) {status="先让曳尔沐问一个问题，再回答。";Raise();return false;}
-   if(pet.State.Sleeping) {pet.State.Sleeping=false;pet.Save();}
+   feedback.Wake();
    ArchiveStore.AddTurn(slot,"answer",text);
    pendingAnswer=text;notice="";
    status="正在把你的回答整理进存档…";
    turnRevision++;
-   if(!pet.State.AiChat) {OfflineInterview(text,"在线 AI 已关闭，这次先离线记录。");return true;}
-   ApiKey.State key=ApiKey.Resolve(pet.State);
+   if(!state.AiChat) {OfflineInterview(text,"在线 AI 已关闭，这次先离线记录。");return true;}
+   ApiKey.State key=ApiKey.Resolve(state);
    if(!key.Configured) {OfflineInterview(text,"还没有配置 API Key，这次先离线记录。");return true;}
    ChatTurn[] turns=ArchiveInterview.BuildTurn(slot);
-   string baseUrl=pet.State.ApiBase,model=pet.State.ApiModel;
+   string baseUrl=state.ApiBase,model=state.ApiModel;
    busy=true;busyTitle="正在整理这条回答…";
    Save();Raise();
-   pet.Act(6,"正在整理这条知识，稍等一下…",20);
-   Ui.InBackground(pet.Dispatcher,delegate {
-    return DeepSeek.Complete(key.Key,baseUrl,model,false,turns,60,1400,0.4);
+   feedback.Act(6,"正在整理这条知识，稍等一下…",20);
+   work.Run(delegate {
+    return DeepSeek.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.3);
    },delegate(ChatOutcome outcome) {FinishInterview(outcome);});
    return true;
   }
@@ -154,12 +165,12 @@ namespace ElymsPet {
    if(slot==null||busy) return;
    if(slot.Turns.Count==0) {status="还没有访谈内容可以整理。";Raise();return;}
    if(!HasApi()) {status="离线模式只能逐条记录；接入 API 后可以把访谈重新整理成条目。";Raise();return;}
-   ApiKey.State key=ApiKey.Resolve(pet.State);
+   ApiKey.State key=ApiKey.Resolve(state);
    ChatTurn[] turns=ArchiveInterview.BuildExtract(slot);
-   string baseUrl=pet.State.ApiBase,model=pet.State.ApiModel;
+   string baseUrl=state.ApiBase,model=state.ApiModel;
    busy=true;busyTitle="正在重新整理最近的访谈…";status=busyTitle;notice="";Raise();
-   Ui.InBackground(pet.Dispatcher,delegate {
-    return DeepSeek.Complete(key.Key,baseUrl,model,false,turns,60,1800,0.2);
+   work.Run(delegate {
+    return DeepSeek.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.2);
    },delegate(ChatOutcome outcome) {FinishExtract(outcome);});
   }
   void FinishInterview(ChatOutcome outcome) {
@@ -172,16 +183,18 @@ namespace ElymsPet {
    InterviewResult result=ArchiveInterview.Parse(outcome.Text);
    if(result.Structured) {
     string nextQuestion=ArchiveInterview.CleanQuestion(result.Reply);
-    bool asked=nextQuestion.Length>0&&ArchiveInterview.LooksLikeQuestion(nextQuestion);
+    bool asked=!result.Pause&&nextQuestion.Length>0&&ArchiveInterview.LooksLikeQuestion(nextQuestion);
     if(asked) ArchiveStore.AddTurn(slot,"ask",nextQuestion);
+    ArchiveKnowledge.Merge(slot,result);
     int added=ArchiveStore.Merge(slot,result.Items);
+    KnowledgeGraph.Merge(slot,result.Links);
     if(result.Summary.Length>0) slot.Summary=result.Summary;
     status="本轮新增 "+added+" 条 · "+outcome.Seconds.ToString("0.0")+"s · "+outcome.CompletionTokens+" tokens";
-    notice=Describe(result.Items,added);
+    notice=Describe(result.Items,added)+(result.Episodes.Count>0?" · 案例仅在原话依据匹配时收录":"");
     Save();turnRevision++;profileRevision++;UpdateDigest();Raise();
-    if(added>0) pet.Act(4,"收到一条新知识，已经写进你的画像里了。",6);
-    else pet.Act(6,"这条我记下了。再讲具体一点，我就能整理成条目。",5);
-    if(!asked) AskNext();
+    if(added>0) feedback.Act(4,"收到一条新知识，已经写进你的画像里了。",6);
+    else feedback.Act(6,"这条我记下了。再讲具体一点，我就能整理成条目。",5);
+    if(!asked&&!slot.Paused) AskNext();
     return;
    }
    // 模型没有按 JSON 回复：对话照常保留，再单独跑一次整理，避免这一轮白聊。
@@ -190,13 +203,13 @@ namespace ElymsPet {
    if(unstructuredAsked) ArchiveStore.AddTurn(slot,"ask",unstructuredQuestion);
    notice="";status="这轮回复不是结构化格式，正在单独整理条目…";
    Save();turnRevision++;Raise();
-   ApiKey.State key=ApiKey.Resolve(pet.State);
+   ApiKey.State key=ApiKey.Resolve(state);
    if(!key.Configured) {busy=false;busyTitle="";status="这轮没能整理成条目；接入 API 后可以重新整理。";Raise();return;}
    ChatTurn[] turns=ArchiveInterview.BuildExtract(slot);
-   string baseUrl=pet.State.ApiBase,model=pet.State.ApiModel;
+   string baseUrl=state.ApiBase,model=state.ApiModel;
    busy=true;busyTitle="正在单独整理条目…";Raise();
-   Ui.InBackground(pet.Dispatcher,delegate {
-    return DeepSeek.Complete(key.Key,baseUrl,model,false,turns,60,1800,0.2);
+   work.Run(delegate {
+    return DeepSeek.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.2);
    },delegate(ChatOutcome extract) {FinishExtract(extract);});
   }
   void FinishExtract(ChatOutcome outcome) {
@@ -205,38 +218,118 @@ namespace ElymsPet {
    if(outcome==null||!outcome.Ok) {status="整理没有成功："+(outcome==null?"没有接通。":outcome.Error);Raise();return;}
    InterviewResult result=ArchiveInterview.Parse(outcome.Text);
    if(!result.Structured) {status="这批内容没能整理成条目，稍后再试一次。";Raise();return;}
-   int added=ArchiveStore.Merge(slot,result.Items);
+   ArchiveKnowledge.Merge(slot,result);
+    int added=ArchiveStore.Merge(slot,result.Items);
+    KnowledgeGraph.Merge(slot,result.Links);
    if(result.Summary.Length>0) slot.Summary=result.Summary;
    status="整理完成：新增 "+added+" 条，现有 "+slot.Items.Count+" 条 · "+outcome.Seconds.ToString("0.0")+"s";
-   notice=Describe(result.Items,added);
+   notice=Describe(result.Items,added)+(result.Episodes.Count>0?" · 案例仅在原话依据匹配时收录":"");
    bool needQuestion=!HasPendingAsk();
    Save();profileRevision++;UpdateDigest();Raise();
-   if(added>0) pet.Act(4,"重新整理好了，画像又清楚了一点。",6);
-   if(needQuestion) AskNext();
+   if(added>0) feedback.Act(4,"重新整理好了，画像又清楚了一点。",6);
+   if(needQuestion&&!slot.Paused) AskNext();
   }
   void OfflineInterview(string answer,string hint) {
    busy=false;busyTitle="";
    if(slot==null) {Raise();return;}
-   string asked=ArchiveGuide.LastAsk(slot);
-   GuideQuestion question=ArchiveGuide.ForAsk(asked);
-   bool addedSomething=false;
-   string note="";
-   if(question!=null&&question.Summary) {
-    if(answer!=null&&answer.Trim().Length>0) {slot.Summary=ChatText.Clip(answer,160);note="画像摘要已更新。";}
-   } else {
-    ArchiveItem item=ArchiveGuide.FromAnswer(question,answer);
-    var items=new List<ArchiveItem>();
-    if(item!=null) items.Add(item);
-    int added=ArchiveStore.Merge(slot,items);
-    addedSomething=added>0;
-    note=addedSomething?"已在本地记录 1 条画像条目。":"这条内容没有新增条目。";
-   }
-   status=hint+" "+note+"（已离线记录；接上 API 后可以继续出题）";
-   notice=addedSomething?"离线记下 1 条，等线路稳了再整理。":"这条没有新增条目。";
-   Save();turnRevision++;profileRevision++;UpdateDigest();Raise();
-   if(addedSomething) pet.Act(4,"这条先记在本机。等线路稳了，我再帮你整理。",6);
+   status=hint+" 回答已保存在本地，接通 API 后点重新整理；暂不推断掌握程度。";
+   notice="原话已保留，等待整理。";Save();turnRevision++;Raise();
   }
-  bool HasApi() {return pet.State.AiChat&&ApiKey.Resolve(pet.State).Configured;}
+  public bool SaveKnowledgeNode(string id,string title,string domain,string boundary,string level,string evidence,string note) {
+   if(busy||slot==null)return false;
+   var item=ArchiveStore.Sanitize(new ArchiveItem{Title=title,Domain=domain,Boundary=boundary,Level=level,Evidence=evidence,Note=note,Source="用户手动录入"});
+   if(item==null){Notify("请填写知识点名称。");return false;}
+   var current=slot.Items.Find(delegate(ArchiveItem x){return x.Id==id;});
+   if(slot.Items.Exists(delegate(ArchiveItem x){return x.Id!=id&&string.Equals(x.Title,item.Title,StringComparison.OrdinalIgnoreCase)&&string.Equals(x.Domain,item.Domain,StringComparison.OrdinalIgnoreCase);})) {Notify("该领域已有同名知识点，请选择已有节点编辑。");return false;}
+   if(current==null) {
+    if(slot.Items.Count>=ArchiveStore.MaxItems){Notify("知识点已达上限，请先整理已有记录。");return false;}
+    slot.Items.Add(item);ArchiveLearning.Record(slot,"ADD",null,item);
+   } else {
+    item.Id=current.Id;
+    if(ArchiveLearning.Same(current,item)){Notify("内容没有变化。");return true;}
+    if(current.Title!=item.Title||current.Domain!=item.Domain)foreach(var link in slot.Links)if(link.From==id||link.To==id)link.Confirmed=false;
+    ArchiveLearning.Record(slot,"UPDATE",current,item);slot.Items[slot.Items.IndexOf(current)]=item;
+   }
+   slot.Updated=DateTime.UtcNow;status="知识节点已保存。";Save();profileRevision++;UpdateDigest();Raise();return true;
+  }
+  public bool SaveKnowledgeLink(string from,string to,string kind,string evidence) {
+   if(busy||slot==null)return false;
+   KnowledgeGraph.Normalize(slot);
+   if(from==to||!slot.Items.Exists(delegate(ArchiveItem x){return x.Id==from;})||!slot.Items.Exists(delegate(ArchiveItem x){return x.Id==to;})||!KnowledgeGraph.ValidKind(kind)){Notify("请选择两个不同的知识点及关系类型。");return false;}
+   evidence=ArchiveStore.Clean(evidence);
+   if(evidence.Length==0){Notify("请写下为什么这样关联，便于之后复盘。");return false;}
+   var link=KnowledgeGraph.Find(slot,from,to,kind);
+   if(link==null){if(slot.Links.Count>=1000){Notify("关系已达上限，请先整理已有关系。");return false;}link=new KnowledgeLink{Id=Guid.NewGuid().ToString("N"),From=from,To=to,Kind=kind};slot.Links.Add(link);}
+   link.Evidence=ArchiveStore.Clip(evidence,500);link.Confirmed=true;link.Source="手动关联";link.At=DateTime.UtcNow;
+   GraphChanged("关系已保存并由你确认。");return true;
+  }
+  public void ConfirmKnowledgeLink(KnowledgeLink link) {
+   if(busy||slot==null||!slot.Links.Contains(link))return;
+   link.Confirmed=!link.Confirmed;GraphChanged(link.Confirmed?"关系已确认。":"关系已退回待核实。");
+  }
+  public void DeleteKnowledgeLink(KnowledgeLink link) {
+   if(busy||slot==null||!slot.Links.Remove(link))return;GraphChanged("关系已删除，知识点保留。");
+  }
+  void GraphChanged(string message) {slot.Updated=DateTime.UtcNow;status=message;Save();profileRevision++;UpdateDigest();Raise();}
+  public string Recall(string query) {return ArchiveRecall.Build(slot,query,14000);}
+  public bool RestoreChange(ArchiveChange change) {
+   if(busy||slot==null||change==null||change.Before==null||change.After==null||!slot.Changes.Contains(change))return false;
+   var current=slot.Items.Find(delegate(ArchiveItem x){return x.Id==change.After.Id;});
+   if(current==null||!ArchiveLearning.Same(current,change.After)){Notify("该知识后来已有变化，不能覆盖。请通过纠正访谈确认当前情况。");return false;}
+   var restored=ArchiveLearning.Copy(change.Before);restored.At=DateTime.UtcNow;
+   if(current.Title!=restored.Title||current.Domain!=restored.Domain)foreach(var link in slot.Links)if(link.From==current.Id||link.To==current.Id)link.Confirmed=false;
+   ArchiveLearning.Record(slot,"RESTORE",current,restored);slot.Items[slot.Items.IndexOf(current)]=restored;
+   slot.Updated=DateTime.UtcNow;status="已恢复这次修改前的知识记录。";
+   Save();profileRevision++;UpdateDigest();Raise();return true;
+  }
+  public bool RecordFeedback(ArchiveWorkflow workflow,string outcome,string note) {
+   if(busy||slot==null)return false;
+   if(!ArchiveLearning.Feedback(slot,workflow,outcome,note)){Notify("请写下具体结果、遇到的问题或改进经验。");return false;}
+   status=outcome=="失败"?"失败经验已保存，流程退回待核实；可以继续访谈修订。":"复盘已保存，后续相关任务会参考案例；不会自动确认流程。";
+   Save();profileRevision++;UpdateDigest();Raise();return true;
+  }
+  public void RemoveEpisode(ArchiveEpisode episode) {
+   if(busy||slot==null||!slot.Episodes.Remove(episode))return;
+   slot.Updated=DateTime.UtcNow;Save();profileRevision++;Raise();
+  }
+  public void Pause() {
+   if(busy||slot==null)return;slot.Paused=true;status="访谈已暂停，已整理的内容会保留。";Save();Raise();
+  }
+  public void Focus(string topic) {
+   if(busy||slot==null)return;
+   slot.Focus=ArchiveStore.Clip(ArchiveStore.Clean(topic),100);slot.Paused=false;
+   if(HasPendingAsk())ArchiveStore.AddTurn(slot,"answer","先跳过这个问题，接下来聚焦："+slot.Focus);
+   Save();turnRevision++;Raise();AskNext();
+  }
+  public bool ConfirmWorkflow(ArchiveWorkflow workflow) {
+   if(busy||slot==null||!slot.Workflows.Contains(workflow))return false;
+   if(!ArchiveKnowledge.Complete(workflow)){Notify("请先通过访谈补齐触发、前置条件、步骤、验收和异常处理，再确认流程。");return false;}
+   workflow.Confirmed=!workflow.Confirmed;slot.Updated=DateTime.UtcNow;
+   status=workflow.Confirmed?"流程已确认，后续相关工作会主动参考。":"流程已退回草稿。";
+   Save();profileRevision++;UpdateDigest();Raise();return true;
+  }
+  public void FetchResource(ArchiveResource resource) {
+   if(busy||slot==null||!slot.Resources.Contains(resource))return;
+   if(resource.Url.Length==0){Notify("先在访谈中补充资料链接。");return;}
+   if(preview){Notify("预览模式不读取远程资料。");return;}
+   if(!HasApi()){Notify("读取资料需要先配置在线 API。");return;}
+   var key=ApiKey.Resolve(state);string baseUrl=state.ApiBase;
+   busy=true;busyTitle="正在读取资料正文…";status=busyTitle;Raise();
+   work.Run(delegate {return WebApi.Fetch(key.Key,baseUrl,resource.Url,45);},delegate(WebOutcome outcome){
+    busy=false;busyTitle="";
+    if(outcome==null||!outcome.Ok){Notify("资料读取失败："+(outcome==null?"无响应":outcome.Error));return;}
+    resource.Content=outcome.Content;resource.Retrieved=DateTime.UtcNow;
+    status="可读正文已缓存到本地资料库（API 最多返回 20000 字符，不代表完整仓库或论文全文）。";
+    Save();profileRevision++;Raise();
+   });
+  }
+  public void RemoveResource(ArchiveResource resource) {
+   if(busy||slot==null)return;slot.Resources.Remove(resource);Save();profileRevision++;Raise();
+  }
+  public void RemoveWorkflow(ArchiveWorkflow workflow) {
+   if(busy||slot==null)return;slot.Workflows.Remove(workflow);Save();profileRevision++;UpdateDigest();Raise();
+  }
+  bool HasApi() {return state.AiChat&&ApiKey.Resolve(state).Configured;}
   bool HasPendingAsk() {return slot!=null&&slot.Turns.Count>0&&slot.Turns[slot.Turns.Count-1].Role=="ask";}
   string Describe(List<ArchiveItem> items,int added) {
    if(added<=0) return "这条没有新增条目。再讲具体一点，就能整理成条目。";
@@ -252,7 +345,8 @@ namespace ElymsPet {
    return text.ToString();
   }
   void TouchAll() {slotRevision++;turnRevision++;profileRevision++;UpdateDigest();Raise();}
-  void UpdateDigest() {pet.ProfileDigest=slot==null?"":ArchiveStore.Digest(slot,10,340);}
+  void UpdateDigest() {Digest=slot==null?"":ArchiveStore.Digest(slot,40,16000);}
+  public void Dispose() {work.Dispose();busy=false;}
   void Raise() {if(Changed!=null) Changed();}
  }
 }

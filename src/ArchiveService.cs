@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -22,7 +22,7 @@ namespace ElymsPet {
   public ArchiveService(PetState state,IWorkScheduler scheduler,PetFeedback feedback,IRepository<ArchiveBook> repository,bool preview,IArchiveApi api=null) {
    this.api=api??new ArchiveApi();
    this.preview=preview;this.state=state;this.feedback=feedback;this.repository=repository;
-   work=new WorkScope(scheduler,delegate(string error) {busy=false;busyTitle="";status=error;Raise();},!preview);
+   work=new WorkScope(scheduler,delegate(string error) {busy=false;busyTitle="";status=error+" 原话已保留，点「恢复上次聊天」重试当前阶段。";Raise();},!preview);
    book=ArchiveStore.Normalize(repository.Load());
    slot=ArchiveStore.Active(book);
    status=slot!=null&&slot.Turns.Count==0?"还没有访谈记录。点「提问」开始，或者直接回答她的问题。":"准备好继续上次的访谈。";
@@ -102,7 +102,7 @@ namespace ElymsPet {
   }
   public void ClearTurns() {
    if(slot==null||busy) return;
-   slot.Turns.Clear();slot.QuestionIndex=0;
+   slot.Turns.Clear();slot.QuestionIndex=0;slot.InterviewStage="";
    notice="访谈记录已清空，画像条目不受影响。";status=notice;
    Save();turnRevision++;Raise();
   }
@@ -116,7 +116,7 @@ namespace ElymsPet {
    slot.Paused=false;
    if(!Save())return;
    if(HasPendingAsk()){status="已恢复上次聊天，保留原来的问题。回答后会按当前联网设置继续查证和追问。";Raise();return;}
-   if(slot.Turns.Count>0)ExtractRecent(true);else AskNext();
+   if(slot.Turns.Count>0&&slot.InterviewStage!="question")ExtractRecent(true);else AskNext();
   }
   public void AskNext() {
    if(slot==null||busy||work.IsDisposed) return;
@@ -128,8 +128,9 @@ namespace ElymsPet {
    ChatTurn[] turns=ArchiveInterview.BuildQuestion(slot);
    PetState snapshot=state.Snapshot();
    string context=ArchiveResearch.Context(slot);var urls=ArchiveResearch.ProvidedUrls(slot);
+   slot.InterviewStage="question";
    busy=true;busyTitle=state.WebEnabled?"正在查证资料并深入思考下一个问题…":"正在深入思考下一个问题…";status=busyTitle;notice="";
-   Raise();
+   Save();Raise();
    work.Run(delegate {
     return ArchiveResearch.Ask(api,snapshot,key.Key,turns,context,urls);
    },delegate(ArchiveResearchResult result) {
@@ -142,13 +143,14 @@ namespace ElymsPet {
    busyTitle="";
    if(slot==null) {Raise();return;}
    if(outcome==null||!outcome.Ok) {
-    status="出题没有成功："+(outcome==null?"没有接通。":outcome.Error);
+    status="出题没有成功："+(outcome==null?"没有接通。":outcome.Error)+" 原话与整理结果已保留，点「恢复上次聊天」只重试提问。";
     Save();Raise();return;
    }
    if(outcome.Truncated){status="思考或追问输出未完整结束，请重试；当前访谈和已取回资料已保留。";Save();Raise();return;}
    string question=ArchiveInterview.CleanQuestion(outcome.Text);
    if(question.Length==0) {status="这次没有生成有效的问题，再试一次。";Save();Raise();return;}
    ArchiveStore.AddTurn(slot,"ask",question);
+   slot.InterviewStage="";
    slot.Turns[slot.Turns.Count-1].Sources=sources;
    notice="";
    status="问题已发出 · "+(outcome.HasReasoning?"模型已返回思考结果":"已请求模型深度思考")+"。回答后继续整理。";
@@ -163,6 +165,7 @@ namespace ElymsPet {
    if(!HasPendingAsk()) {status="先让曳尔沐问一个问题，再回答。";Raise();return false;}
    feedback.Wake();
    ArchiveStore.AddTurn(slot,"answer",text);
+   slot.InterviewStage="extract";
    pendingAnswer=text;notice="";
    status="正在把你的回答整理进存档…";
    turnRevision++;
@@ -175,7 +178,7 @@ namespace ElymsPet {
    Save();Raise();
    feedback.Act(6,"正在整理这条知识，稍等一下…",20);
    work.Run(delegate {
-    return api.Complete(key.Key,baseUrl,model,true,turns,150,16384,0.3);
+    return ArchiveCompletion.Complete(api,key.Key,baseUrl,model,turns,16384,0.3,true);
    },delegate(ChatOutcome outcome) {FinishInterview(outcome);});
    return true;
   }
@@ -187,9 +190,10 @@ namespace ElymsPet {
    ChatTurn[] turns=ArchiveInterview.BuildExtract(slot);
    if(resume)turns[0]=new ChatTurn("system",turns[0].Content+"\n用户刚刚明确点击了恢复上次聊天。沿用当前主题，忽略历史中的暂停请求，本次 pause=false；不要重置背景。");
    string baseUrl=state.ApiBase,model=state.ApiModel;
-   busy=true;busyTitle="正在深入思考并重新整理最近的访谈…";status=busyTitle;notice="";Raise();
+   slot.InterviewStage="extract";
+   busy=true;busyTitle="正在深入思考并重新整理最近的访谈…";status=busyTitle;notice="";Save();Raise();
    work.Run(delegate {
-    return api.Complete(key.Key,baseUrl,model,true,turns,150,16384,0.2);
+    return ArchiveCompletion.Complete(api,key.Key,baseUrl,model,turns,16384,0.2,true);
    },delegate(ChatOutcome outcome) {FinishExtract(outcome,resume);});
   }
   void FinishInterview(ChatOutcome outcome) {
@@ -205,6 +209,7 @@ namespace ElymsPet {
     string nextQuestion=ArchiveInterview.CleanQuestion(result.Reply);
     bool asked=!state.WebEnabled&&!result.Pause&&nextQuestion.Length>0&&ArchiveInterview.LooksLikeQuestion(nextQuestion);
     if(asked) ArchiveStore.AddTurn(slot,"ask",nextQuestion);
+    slot.InterviewStage=asked?"":"question";
     ArchiveKnowledge.Merge(slot,result);
     int added=ArchiveStore.Merge(slot,result.Items);
     KnowledgeGraph.Merge(slot,result.Links);
@@ -217,29 +222,17 @@ namespace ElymsPet {
     if(!asked&&!slot.Paused) AskNext();
     return;
    }
-   // 模型没有按 JSON 回复：对话照常保留，再单独跑一次整理，避免这一轮白聊。
-   string unstructuredQuestion=ArchiveInterview.CleanQuestion(result.Reply);
-   bool unstructuredAsked=!state.WebEnabled&&unstructuredQuestion.Length>0&&ArchiveInterview.LooksLikeQuestion(unstructuredQuestion);
-   if(unstructuredAsked) ArchiveStore.AddTurn(slot,"ask",unstructuredQuestion);
-   notice="";status="这轮回复不是结构化格式，正在单独整理条目…";
-   Save();turnRevision++;Raise();
-   ApiKey.State key=ApiKey.Resolve(state);
-   if(!key.Configured) {busy=false;busyTitle="";status="这轮没能整理成条目；接入 API 后可以重新整理。";Raise();return;}
-   ChatTurn[] turns=ArchiveInterview.BuildExtract(slot);
-   string baseUrl=state.ApiBase,model=state.ApiModel;
-   busy=true;busyTitle="正在深入思考并单独整理条目…";Raise();
-   work.Run(delegate {
-    return api.Complete(key.Key,baseUrl,model,true,turns,150,16384,0.2);
-   },delegate(ChatOutcome extract) {FinishExtract(extract);});
+   OfflineInterview(pendingAnswer,"整理结果格式无效，未更新知识条目。");
   }
   void FinishExtract(ChatOutcome outcome,bool resume=false) {
    busy=false;busyTitle="";
    if(slot==null) {Raise();return;}
-   if(outcome==null||!outcome.Ok) {status="整理没有成功："+(outcome==null?"没有接通。":outcome.Error);Raise();return;}
+   if(outcome==null||!outcome.Ok) {status="整理没有成功："+(outcome==null?"没有接通。":outcome.Error)+" 原话已保留，点「恢复上次聊天」重试。";Raise();return;}
    if(outcome.Truncated){status="思考或整理输出未完整结束，原记录已保留，请重试整理。";Raise();return;}
    InterviewResult result=ArchiveInterview.Parse(outcome.Text);
    if(!result.Structured) {status="这批内容没能整理成条目，稍后再试一次。";Raise();return;}
-   if(resume)result.Pause=false;
+   // Bulk extraction must not replay a pause request from older turns.
+   result.Pause=false;
    ArchiveKnowledge.Merge(slot,result);
     int added=ArchiveStore.Merge(slot,result.Items);
     KnowledgeGraph.Merge(slot,result.Links);
@@ -247,6 +240,7 @@ namespace ElymsPet {
    status="整理完成：新增 "+added+" 条，现有 "+slot.Items.Count+" 条 · "+outcome.Seconds.ToString("0.0")+"s";
    notice=Describe(result.Items,added)+(result.Episodes.Count>0?" · 案例仅在原话依据匹配时收录":"");
    bool needQuestion=!HasPendingAsk();
+   slot.InterviewStage=needQuestion?"question":"";
    Save();profileRevision++;UpdateDigest();Raise();
    if(added>0) feedback.Act(4,"重新整理好了，画像又清楚了一点。",6);
    if(needQuestion&&!slot.Paused) AskNext();
@@ -254,7 +248,7 @@ namespace ElymsPet {
   void OfflineInterview(string answer,string hint) {
    busy=false;busyTitle="";
    if(slot==null) {Raise();return;}
-   status=hint+" 回答已保存在本地，接通 API 后点重新整理；暂不推断掌握程度。";
+   status=hint+" 回答已保存在本地，点「恢复上次聊天」重试整理并继续提问；暂不推断掌握程度。";
    notice="原话已保留，等待整理。";Save();turnRevision++;Raise();
   }
   public bool SaveKnowledgeNode(string id,string title,string domain,string boundary,string level,string evidence,string note) {
@@ -320,7 +314,15 @@ namespace ElymsPet {
   public void Focus(string topic) {
    if(busy||slot==null)return;
    slot.Focus=ArchiveStore.Clip(ArchiveStore.Clean(topic),100);slot.Paused=false;
+   slot.InterviewGoal=slot.Focus;
    if(HasPendingAsk())ArchiveStore.AddTurn(slot,"answer","先跳过这个问题，接下来聚焦："+slot.Focus);
+   Save();turnRevision++;Raise();AskNext();
+  }
+  public void BackToWorkflow() {
+   if(busy||slot==null)return;
+   string goal=string.IsNullOrEmpty(slot.InterviewGoal)?slot.Focus:slot.InterviewGoal;
+   slot.Paused=false;
+   ArchiveStore.AddTurn(slot,"answer","先跳过局部细节，回到工作主线："+(string.IsNullOrEmpty(goal)?"最近一项代表性工作的完整流程":goal)+"。请根据已有回答补一个主要阶段、验收或交付方面的缺口，不重复问已说明的步骤。");
    Save();turnRevision++;Raise();AskNext();
   }
   public bool ConfirmWorkflow(ArchiveWorkflow workflow) {

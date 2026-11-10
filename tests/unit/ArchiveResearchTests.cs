@@ -45,6 +45,7 @@ namespace ElymsPet {
     api=new Api("{\"mode\":\"search\",\"query\":\"GQA\"}","继续？");api.Responses.Peek().Truncated=true;result=Run(api,state,slot);Check(api.Searches==0,"truncated plan cannot execute tools");
     api=new Api("{\"mode\":\"read\",\"url\":\""+Repo+"\"}","继续？");api.ThrowRead=true;result=Run(api,state,slot);Check(result.Question.Ok&&result.Status.Contains("中断"),"fetch exception does not lose the interview");
     PersistenceAndServices(root);
+    RecoveryAndAgenda(root);
     Console.WriteLine("PASS archive research: "+checks+" checks");
    }finally{Storage.Folder=previous;}
   }
@@ -76,20 +77,62 @@ namespace ElymsPet {
    Check(!service.Slot.Paused&&service.HasQuestion&&api.Inputs[0][0].Content.Contains("用户刚刚明确点击"),"explicit resume overrides historic pause and continues same topic");service.Dispose();
    Check(api.Thinking[0]&&api.Tokens[0]==16384,"resume extraction uses thinking mode");
    book=repository.Load();slot=ArchiveStore.Active(book);ArchiveStore.AddTurn(slot,"answer","回答已保存但接口出错");repository.Save(book);
-   api=new Api();api.Responses.Enqueue(ChatOutcome.Fail("offline","",0,0));scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);int before=service.Slot.Turns.Count;service.ResumeInterview();scheduler.Drain();
+   api=new Api();api.Responses.Enqueue(ChatOutcome.Fail("offline","",0,0));api.Responses.Enqueue(ChatOutcome.Fail("offline","",0,0));scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);int before=service.Slot.Turns.Count;service.ResumeInterview();scheduler.Drain();
    Check(!service.Busy&&!service.HasQuestion&&service.Slot.Turns.Count==before&&service.Status.Contains("没有成功"),"resume extraction failure preserves original last answer for retry");service.Dispose();
    api=new Api("{\"items\":[]}");scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.ResumeInterview();scheduler.RunWork();service.Dispose();scheduler.PostAll();
    Check(service.Slot.Turns.Count==before&&api.Inputs.Count==1,"disposed service ignores late results and does not launch research");
    state.AiChat=false;api=new Api();scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.ResumeInterview();Check(scheduler.Work.Count==0&&service.Slot.Turns.Count==before,"AI-off resume retains history without network");service.Dispose();
    book=repository.Load();slot=ArchiveStore.Active(book);for(int i=0;i<80;i++)ArchiveStore.AddTurn(slot,"answer","历史 "+i);repository.Save(book);
    Check(ArchiveStore.Active(repository.Load()).Turns.Count>60,"new version retains more than legacy sixty messages");
-   api=new Api("{\"items\":[{\"title\":\"未完整知识\",\"domain\":\"测试\"}]}");api.Responses.Peek().Truncated=true;state.AiChat=true;scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);int oldItems=service.Slot.Items.Count;service.ExtractRecent();scheduler.Drain();
+   api=new Api("{\"items\":[{\"title\":\"未完整知识\",\"domain\":\"测试\"}]}");api.Responses.Peek().Truncated=true;api.Responses.Enqueue(api.Responses.Peek());state.AiChat=true;scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);int oldItems=service.Slot.Items.Count;service.ExtractRecent();scheduler.Drain();
    Check(service.Slot.Items.Count==oldItems&&!service.Busy&&service.Status.Contains("未完整"),"truncated extraction never overwrites knowledge");service.Dispose();
    book=repository.Load();slot=ArchiveStore.Active(book);ArchiveStore.AddTurn(slot,"ask","再说一点？");repository.Save(book);
-   api=new Api("{\"items\":[{\"title\":\"未完整知识\",\"domain\":\"测试\"}]}");api.Responses.Peek().Truncated=true;scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.Answer("实际回答");scheduler.Drain();
+   api=new Api("{\"items\":[{\"title\":\"未完整知识\",\"domain\":\"测试\"}]}");api.Responses.Peek().Truncated=true;api.Responses.Enqueue(api.Responses.Peek());scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.Answer("实际回答");scheduler.Drain();
    Check(service.Slot.Items.Count==oldItems&&service.Slot.Turns.Last().Text=="实际回答"&&!service.HasQuestion,"truncated interview retains raw answer and does not merge partial JSON");service.Dispose();
-   api=new Api("{\"mode\":\"none\"}","没说完的问题");api.Responses.Last().Truncated=true;scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.AskNext();scheduler.Drain();
+   api=new Api("{\"mode\":\"none\"}","没说完的问题");api.Responses.Last().Truncated=true;api.Responses.Enqueue(api.Responses.Last());scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.AskNext();scheduler.Drain();
    Check(!service.HasQuestion&&!service.Busy&&service.Status.Contains("未完整"),"truncated thinking question is not persisted as a valid prompt");service.Dispose();
+  }
+  static void RecoveryAndAgenda(string root) {
+   var state=State();var slot=Slot();
+   var api=new Api("{\"mode\":\"read\",\"url\":\""+Repo+"\"}","","从接到需求到交付，主要经过哪些阶段？");
+   var result=Run(api,state,slot);
+   Check(result.Question.Ok&&api.Inputs.Count==3&&api.Reads.Count==1,"empty question retries only model call without repeating web tools");
+   api=new Api("收到，我记下了。","你怎样验收最终结果？");
+   var response=ArchiveCompletion.Complete(api,"key","url","model",ArchiveInterview.BuildQuestion(slot),8192,0.5,false);
+   Check(response.Ok&&api.Inputs.Count==2&&response.Text.Contains("验收"),"non-question reply is repaired instead of blocking on a fake question");
+   api=new Api();api.Responses.Enqueue(ChatOutcome.Fail("empty","empty content",200,0));api.Responses.Enqueue(Ok("{\"items\":[]}"));
+   response=ArchiveCompletion.Complete(api,"key","url","model",ArchiveInterview.BuildTurn(slot),16384,0.3,true);
+   Check(response.Ok&&api.Inputs.Count==2,"HTTP 200 empty body retries extraction");
+   api=new Api("not JSON","{\"items\":[]}");response=ArchiveCompletion.Complete(api,"key","url","model",ArchiveInterview.BuildTurn(slot),16384,0.3,true);
+   Check(response.Ok&&api.Inputs.Count==2,"malformed structured result is repaired before merging");
+   foreach(int status in new[]{408,429,503}) {
+    api=new Api();api.Responses.Enqueue(ChatOutcome.Fail("temporary","",status,0));api.Responses.Enqueue(Ok("流程如何验收？"));
+    response=ArchiveCompletion.Complete(api,"key","url","model",ArchiveInterview.BuildQuestion(slot),8192,0.5,false);
+    Check(response.Ok&&api.Inputs.Count==2,"temporary HTTP failure retries: "+status);
+   }
+   api=new Api();api.Responses.Enqueue(ChatOutcome.Fail("key invalid","",401,0));response=ArchiveCompletion.Complete(api,"key","url","model",ArchiveInterview.BuildQuestion(slot),8192,0.5,false);
+   Check(!response.Ok&&api.Inputs.Count==1,"authentication failure is not automatically retried");
+   api=new Api("","");response=ArchiveCompletion.Complete(api,"key","url","model",ArchiveInterview.BuildQuestion(slot),8192,0.5,false);
+   Check(!response.Ok&&api.Inputs.Count==2,"persistent empty reply stops after exactly one retry");
+   slot.InterviewGoal="模型部署与调优";ArchiveKnowledge.Merge(slot,ArchiveInterview.Parse("{\"focus\":\"某个算子的配置值\"}"));
+   Check(slot.InterviewGoal=="模型部署与调优"&&ArchiveInterview.BuildQuestionSystem(slot).Contains("稳定工作主线：模型部署与调优"),"model focus drift cannot overwrite stable interview goal");
+   slot.Workflows.Add(new ArchiveWorkflow{Title="模型部署与调优",Trigger="验证配置",Steps="看代码，再 profiling，最后基准测试"});
+   ArchiveStore.AddTurn(slot,"ask","细节一？");ArchiveStore.AddTurn(slot,"answer","不确定");ArchiveStore.AddTurn(slot,"ask","细节二？");ArchiveStore.AddTurn(slot,"answer","还没验证");
+   string agenda=ArchiveInterview.Agenda(slot);
+   Check(agenda.Contains("主线回顾轮")&&agenda.Contains("结果验收与交付标准")&&!agenda.Contains("任务目标与触发；"),"third-question checkpoint selects missing workflow coverage without asking known trigger");
+   Check(ArchiveInterview.BuildSystem(slot).Contains("主线回顾轮")&&ArchiveInterview.BuildQuestionSystem(slot).Contains("主线回顾轮"),"both offline-web and researched questions share mainline agenda");
+   var repository=new JsonRepository<ArchiveBook>(Path.Combine(root,"stage-recovery.json"));var book=ArchiveStore.Normalize(new ArchiveBook());slot=ArchiveStore.Active(book);ArchiveStore.AddTurn(slot,"ask","最近在做什么？");repository.Save(book);
+   var scheduler=new Scheduler();api=new Api("{\"items\":[]}","{\"mode\":\"none\"}","","");
+   var service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.Answer("做部署测试");scheduler.Drain();
+   Check(!service.Busy&&!service.HasQuestion&&service.Slot.InterviewStage=="question"&&service.Status.Contains("只重试提问"),"failed question leaves persisted question stage with actionable status");
+   int turns=service.Slot.Turns.Count;service.Dispose();
+   api=new Api("{\"mode\":\"none\"}","这项任务的交付物是什么？");scheduler=new Scheduler();service=new ArchiveService(state,scheduler,Feedback,repository,false,api);service.ResumeInterview();scheduler.Drain();
+   Check(service.HasQuestion&&api.Inputs.Count==2&&service.Slot.Turns.Count==turns+1&&service.Slot.InterviewStage=="","restart retries question without re-extracting or duplicating answer");
+   api.Responses.Enqueue(ChatOutcome.Fail("empty","",200,0));api.Responses.Enqueue(Ok("{\"items\":[],\"reply\":\"这项任务的输入是什么？\"}"));state.WebEnabled=false;
+   service.Answer("交付性能对比报告");scheduler.Drain();
+   Check(service.HasQuestion&&service.LatestQuestion.Contains("输入")&&!service.Busy,"empty extraction recovers and automatically continues to next question");
+   api.Responses.Enqueue(Ok("如何判断整个流程完成？"));service.BackToWorkflow();scheduler.Drain();
+   Check(service.HasQuestion&&service.Slot.Turns[service.Slot.Turns.Count-2].Text.Contains("回到工作主线")&&service.LatestQuestion.Contains("整个流程"),"mainline action replaces pending detail question and continues interview");service.Dispose();
   }
   sealed class Api:IArchiveApi {
    public readonly Queue<ChatOutcome> Responses=new Queue<ChatOutcome>();

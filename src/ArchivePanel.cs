@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -84,12 +84,12 @@ namespace ElymsPet {
    var talk=Ui.Stack(
     Ui.Text("逐层了解你的工作经验",18,"#4F3B43"),
     resumeSummary,Ui.Row(resumeButton),researchStatus,
-    Ui.Text("从最近一项真实工作说起；会什么、哪里不熟悉，都可以直接说。流程会先保存为草稿。",12,"#78616A"),
+    Ui.Text("先梳理目标、主要阶段和交付，再深入关键决策。遇到空回复或临时错误会自动重试一次；仍失败可恢复当前阶段。",12,"#78616A"),
     Ui.Text("本次想深入的主题（可选）",12,"#78616A"),
     Ui.Row(focusInput,Ui.Button("聚焦这个主题",delegate {if(!string.IsNullOrWhiteSpace(focusInput.Text))archive.Focus(focusInput.Text);},false)),
     extractStatus,interviewQuestion,new Expander{Header="本轮查证状态与来源",Content=researchSources},inputRow,
     Ui.Row(Ui.Button("这部分不熟悉",delegate {interviewInput.Text="这部分我还不熟悉，不能独立完成。";interviewInput.Focus();},false),Ui.Button("跳过这个问题",delegate {archive.Focus(archive.Slot.Focus.Length>0?archive.Slot.Focus:"换一个工作方面，先了解背景");},false),Ui.Button("暂停访谈",delegate {archive.Pause();},false)),
-    Ui.Row(interviewAsk,extractButton,Ui.Button("清空访谈记录",ClearInterview,false)),
+    Ui.Row(Ui.Button("回到工作主线",delegate {archive.BackToWorkflow();},false),interviewAsk,extractButton,Ui.Button("清空访谈记录",ClearInterview,false)),
     Ui.Text("提问和整理会向 API 发送近期访谈与背景。开启联网时按需检索公开技术资料并缓存来源，每轮最多一次搜索、两次网页读取；可能产生额外 API 费用。资料不等于你已掌握的知识。",11,"#795F69"),
     new Expander{Header="查看访谈记录",Content=interviewLog});
    pages.Items.Add(new TabItem{Header="深入访谈",Content=Ui.Card(talk)});
@@ -191,7 +191,7 @@ namespace ElymsPet {
    if(researchSources!=null)researchSources.Text=archive.LatestSources.Length>0?archive.LatestSources:"这条问题没有联网查证记录；旧版本的问题会保留，回答后再按当前设置继续。";
    if(focusStatus!=null)focusStatus.Text=archive.Slot.Name+" · "+(archive.Slot.Paused?"已暂停 · ":"当前主题 · ")+(archive.Slot.Focus.Length==0?"建立工作背景":archive.Slot.Focus);
    string asked=archive.LatestQuestion;
-   interviewQuestion.Text=asked.Length>0?"当前问题："+asked:"还没有问题。点「让曳尔沐提问」，由 DeepSeek 主动问一个。";
+   interviewQuestion.Text=asked.Length>0?"当前问题："+asked:archive.Slot.Turns.Count>0?"回答已保留。若未自动继续，可点「恢复上次聊天」接着完成当前阶段。":"还没有问题。点「开始 / 继续访谈」开始。";
   }
   void AppendInterview(string who,string text) {
    if(interviewLog==null)return;

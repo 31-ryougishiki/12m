@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -125,7 +125,7 @@ namespace ElymsPet {
     Assert(cleanQuestion=="你平时用 Git 做什么？","question cleanup");
     Assert(ArchiveInterview.LooksLikeQuestion(cleanQuestion)&&!ArchiveInterview.LooksLikeQuestion("好的，我记下了。"),"question detection");
     ChatTurn[] questionTurns=ArchiveInterview.BuildQuestion(slot);
-    Assert(questionTurns.Length>=3&&questionTurns[0].Role=="system"&&questionTurns[0].Content.Contains("进行深入的了解")&&questionTurns[0].Content.Contains("帮助用户完成一些工作")&&questionTurns[0].Content.Contains("主动"),"question prompt goal");
+    Assert(questionTurns.Length>=3&&questionTurns[0].Role=="system"&&questionTurns[0].Content.Contains("协助完成整项工作")&&questionTurns[0].Content.Contains("流程骨架")&&questionTurns[0].Content.Contains("主动"),"question prompt goal");
     ArchiveSlot offlineSlot=ArchiveStore.NewSlot("离线测试");
     ArchiveStore.AddTurn(offlineSlot,"ask",ArchiveGuide.Questions[1].Text);
     ArchiveItem offlineItem=ArchiveGuide.FromAnswer(ArchiveGuide.ForAsk(ArchiveGuide.Questions[1].Text),"我主要做 WPF 桌面开发，做过几个完整项目。");

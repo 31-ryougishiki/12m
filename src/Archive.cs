@@ -36,6 +36,8 @@ namespace ElymsPet {
   [DataMember] public int QuestionIndex = 0;
   [DataMember] public string Focus = "";
   [DataMember] public bool Paused;
+  [DataMember] public string InterviewStage = "";
+  [DataMember] public string InterviewGoal = "";
   [DataMember] public List<KnowledgeLink> Links = new List<KnowledgeLink>();
   [DataMember] public List<ArchiveChange> Changes = new List<ArchiveChange>();
   [DataMember] public List<ArchiveEpisode> Episodes = new List<ArchiveEpisode>();
@@ -467,7 +469,29 @@ namespace ElymsPet {
  // 访谈与整理用的提示词、JSON 解析。所有输出先经过 Sanitize，避免模型跑偏写坏存档。
  public static class ArchiveInterview {
   public const string SchemaHint = "输出格式：只输出一个 JSON 对象，不要 Markdown 代码块，不要多余文字：{\"reply\":\"先回应对方，再问下一个问题（只问一个）\",\"items\":[{\"title\":\"知识点或技能，不超过 20 字\",\"domain\":\"领域，不超过 8 字\",\"level\":\"了解|会用|熟练|专长\",\"evidence\":\"对方原话里的依据，不超过 60 字\",\"note\":\"你的补充，可为空\"}],\"summary\":\"用一句话概括目前画像，没有新增可留空\"}";
-  public const string Understanding = "你可以进行深入的了解：不要只确认「会不会」，可以追问具体项目、实际做法、判断标准、踩过的坑、常用工具和协作方式，一次只往下挖一层。整理出的画像会用来帮助用户完成一些工作：写方案、做技术选型、拆任务、写文档、给建议；因此问题要能挖出对工作真正有用的信息，而不是泛泛的自我介绍。";
+  public const string Understanding = "访谈的价值是今后能协助完成整项工作，不是考察零散知识。先建立从接到任务到交付的流程骨架，再追问对结果有影响的决策。每次只问一个问题；用自然语言承接，但不要机械追着上一句的参数、算子名、版本号问。对同一局部最多连续追问两轮，随后回到未覆盖的工作阶段；用户明确要求深入或细节确实阻碍关键决策时才例外。用户说不熟悉、照用配置、未验证时记录边界并前进，不换个说法反复考问。";
+  public static string Agenda(ArchiveSlot slot) {
+   var text=new StringBuilder("\n本轮选题策略：按对后续协助完成工作的价值排序；优先补工作主线缺口，不按最后出现的技术名词选题。已回答的内容只简短复述，不重复询问。每次只选一个缺口，不把下列维度一次全部问出。\n");
+   if(slot==null)return text.ToString();
+   string goal=string.IsNullOrEmpty(slot.InterviewGoal)?slot.Focus:slot.InterviewGoal;
+   text.Append("稳定工作主线：").Append(string.IsNullOrEmpty(goal)?"尚未确定，先选一项最近的代表性工作":goal).Append("\n已有背景摘要：").Append(slot.Summary).Append("\n");
+   int asks=0;foreach(var turn in slot.Turns)if(turn.Role=="ask")asks++;
+   if(asks>0&&asks%3==0)text.Append("本轮是主线回顾轮：必须回到尚未覆盖的阶段、阶段交接或交付标准，不继续追同一参数或假设故障。若主线已完整，核对流程草稿中一个关键不确定点。\n");
+   ArchiveWorkflow selected=null;double best=0;
+   foreach(var workflow in slot.Workflows) {double score=ArchiveRecall.Score(goal??"",workflow.Title+" "+workflow.Trigger);if(score>best){best=score;selected=workflow;}}
+   if(selected==null)text.Append("当前主线尚无匹配流程草稿：优先从真实案例补齐主要阶段，不重复用户刚给出的顺序。已有阶段顺序则问任务目标、验收或交付中最重要的一个未知点。不要为问细节而问细节。\n");
+   else {
+    text.Append("当前主线相关流程：").Append(selected.Title).Append("；优先核实缺口（须先检查近期回答，空字段不等于用户不会）：");
+    if(string.IsNullOrWhiteSpace(selected.Trigger))text.Append("任务目标与触发；");
+    if(string.IsNullOrWhiteSpace(selected.Preconditions))text.Append("输入与前置约束；");
+    if(string.IsNullOrWhiteSpace(selected.Steps))text.Append("主要阶段与先后顺序；");
+    if(string.IsNullOrWhiteSpace(selected.Checks))text.Append("结果验收与交付标准；");
+    if(string.IsNullOrWhiteSpace(selected.Exceptions))text.Append("关键异常与回退；");
+    text.Append("再核实阶段交接、交付物和协作职责；草稿完整时先请用户审阅，勿无限追加细节。\n");
+   }
+   text.Append("例如用户已说『先看代码，再 profiling，最后基准测试』，应整理为流程，再问验收标准或如何交付结论；不要立刻围绕某个融合算子连问多轮。外部查证只帮助理解当前阶段，不因网页出现新术语转移工作主线。\n");
+   return text.ToString();
+  }
   public static string BuildSystem(ArchiveSlot slot) {
    var text=new StringBuilder();
    text.Append(CharacterPersona.Prompt);

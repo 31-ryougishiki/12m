@@ -101,7 +101,7 @@ namespace ElymsPet {
    body.Children.Add(questionBanner);Grid.SetRow(questionBanner,3);
    questionBanner.MouseLeftButtonUp+=delegate(object sender,MouseButtonEventArgs e) {
     if(!archiveMode||archive.Busy)return;
-    if(archive.Slot.Paused){archive.AskNext();e.Handled=true;return;}
+     if(archive.Slot.Paused){archive.ResumeInterview();e.Handled=true;return;}
     if(archive.LatestQuestion.Length>0)return;
     if(!archive.CanAsk) {archive.Notify("出题需要接通 DeepSeek：请在「设置 → AI 对话」里启用在线 AI 并配置 API Key。");pet.OpenPanel(PanelTab.Settings);return;}
     archive.AskNext();
@@ -340,12 +340,14 @@ namespace ElymsPet {
     ArchiveTurn turn=slot.Turns[i];
     DateTime at=turn.At==DateTime.MinValue?DateTime.Now:turn.At.ToLocalTime();
     archiveView.Add(new ChatLine(turn.Role=="ask"?ChatSpeaker.Elyms:ChatSpeaker.User,turn.Text,"",at));
+    if(!string.IsNullOrEmpty(turn.Sources))archiveView.Add(new ChatLine(ChatSpeaker.Notice,turn.Sources,"",at));
    }
    if(archive.Notice.Length>0)archiveView.Add(new ChatLine(ChatSpeaker.Notice,archive.Notice,""));
    if(slot.Turns.Count==0&&archive.Notice.Length==0)archiveView.ShowEmpty("点「存档」旁边的存档名可以切换；先让曳尔沐问一个问题吧。");
   }
   void OpenSlotMenu() {
    var menu=MenuTheme.Create();menu.PlacementTarget=archiveSlotText;menu.Placement=System.Windows.Controls.Primitives.PlacementMode.Bottom;
+   var resume=MenuTheme.Item("恢复上次聊天","\uE8A7",delegate {archive.ResumeInterview();});resume.IsEnabled=!archive.Busy&&archive.Slot.Turns.Count>0;menu.Items.Add(resume);menu.Items.Add(new Separator());
    ArchiveSlot current=archive.Slot;
    var slots=archive.Book.Slots;
    for(int i=0;i<slots.Count;i++) {

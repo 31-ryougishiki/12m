@@ -10,6 +10,7 @@ namespace ElymsPet {
   readonly PetFeedback feedback;
   readonly WorkScope work;
   readonly IRepository<ArchiveBook> repository;
+  readonly IArchiveApi api;
   public string Digest {get;private set;}
   readonly ArchiveBook book;
   ArchiveSlot slot;
@@ -18,7 +19,8 @@ namespace ElymsPet {
   string pendingAnswer="";
   int turnRevision,profileRevision,slotRevision;
   public event Action Changed;
-  public ArchiveService(PetState state,IWorkScheduler scheduler,PetFeedback feedback,IRepository<ArchiveBook> repository,bool preview) {
+  public ArchiveService(PetState state,IWorkScheduler scheduler,PetFeedback feedback,IRepository<ArchiveBook> repository,bool preview,IArchiveApi api=null) {
+   this.api=api??new ArchiveApi();
    this.preview=preview;this.state=state;this.feedback=feedback;this.repository=repository;
    work=new WorkScope(scheduler,delegate(string error) {busy=false;busyTitle="";status=error;Raise();},!preview);
    book=ArchiveStore.Normalize(repository.Load());
@@ -35,6 +37,9 @@ namespace ElymsPet {
   public string Notice {get {return notice;}}
   public bool HasQuestion {get {return HasPendingAsk();}}
   public bool CanAsk {get {return HasApi();}}
+  public string ResumeSummary {get {return ArchiveResearch.ResumeSummary(slot);}}
+  public string ResearchStatus {get {return state.WebEnabled?"联网查证已开启 · 按需搜索 / 读取公开资料，来源存入资料库":"联网查证已关闭 · 可在设置 → AI 对话中开启";}}
+  public string LatestSources {get {return HasPendingAsk()?slot.Turns[slot.Turns.Count-1].Sources??"":"";}}
   public int TurnRevision {get {return turnRevision;}}
   public int ProfileRevision {get {return profileRevision;}}
   public int SlotRevision {get {return slotRevision;}}
@@ -104,40 +109,52 @@ namespace ElymsPet {
   public void EnsureQuestion() {
    if(slot==null||busy) return;
    if(HasPendingAsk()||slot.Paused) return;
-   AskNext();
+   ResumeInterview();
+  }
+  public void ResumeInterview() {
+   if(slot==null||busy||work.IsDisposed)return;
+   slot.Paused=false;
+   if(!Save())return;
+   if(HasPendingAsk()){status="已恢复上次聊天，保留原来的问题。回答后会按当前联网设置继续查证和追问。";Raise();return;}
+   if(slot.Turns.Count>0)ExtractRecent(true);else AskNext();
   }
   public void AskNext() {
-   if(slot==null||busy) return;
+   if(slot==null||busy||work.IsDisposed) return;
    slot.Paused=false;
    if(HasPendingAsk()) {Save();status="上一条问题还没有回答。可以继续回答，也可以跳过或切换主题。";Raise();return;}
    if(!state.AiChat) {status="出题需要接通在线 AI：请在「设置 → AI 对话」里启用在线 AI。";busyTitle="";Raise();return;}
    ApiKey.State key=ApiKey.Resolve(state);
    if(!key.Configured) {status="出题需要 DeepSeek API Key：请在「设置 → AI 对话」里配置。";busyTitle="";Raise();return;}
    ChatTurn[] turns=ArchiveInterview.BuildQuestion(slot);
-   string baseUrl=state.ApiBase,model=state.ApiModel;
-   busy=true;busyTitle="正在想下一个问题…";status=busyTitle;notice="";
+   PetState snapshot=state.Snapshot();
+   string context=ArchiveResearch.Context(slot);var urls=ArchiveResearch.ProvidedUrls(slot);
+   busy=true;busyTitle=state.WebEnabled?"正在判断是否需要查证资料，并准备追问…":"正在想下一个问题…";status=busyTitle;notice="";
    Raise();
    work.Run(delegate {
-    return DeepSeek.Complete(key.Key,baseUrl,model,false,turns,30,180,0.8);
-   },delegate(ChatOutcome outcome) {FinishQuestion(outcome);});
+    return ArchiveResearch.Ask(api,snapshot,key.Key,turns,context,urls);
+   },delegate(ArchiveResearchResult result) {
+    ArchiveResearch.Merge(slot,result);profileRevision++;
+    FinishQuestion(result.Question,result.Sources);
+   });
   }
-  void FinishQuestion(ChatOutcome outcome) {
+  void FinishQuestion(ChatOutcome outcome,string sources) {
    busy=false;
    busyTitle="";
    if(slot==null) {Raise();return;}
    if(outcome==null||!outcome.Ok) {
     status="出题没有成功："+(outcome==null?"没有接通。":outcome.Error);
-    Raise();return;
+    Save();Raise();return;
    }
    string question=ArchiveInterview.CleanQuestion(outcome.Text);
-   if(question.Length==0) {status="这次没有生成有效的问题，再试一次。";Raise();return;}
+   if(question.Length==0) {status="这次没有生成有效的问题，再试一次。";Save();Raise();return;}
    ArchiveStore.AddTurn(slot,"ask",question);
+   slot.Turns[slot.Turns.Count-1].Sources=sources;
    notice="";
    status="问题已发出。回答后由 DeepSeek 整理成条目。";
    Save();turnRevision++;Raise();
   }
   public bool Answer(string raw) {
-   if(slot==null||busy) return false;
+   if(slot==null||busy||work.IsDisposed) return false;
    string text=(raw==null?"":raw).Trim();
    if(text.Length==0) return false;
    if(slot.Paused){Notify("访谈已暂停，请先继续访谈。");return false;}
@@ -157,21 +174,22 @@ namespace ElymsPet {
    Save();Raise();
    feedback.Act(6,"正在整理这条知识，稍等一下…",20);
    work.Run(delegate {
-    return DeepSeek.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.3);
+    return api.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.3);
    },delegate(ChatOutcome outcome) {FinishInterview(outcome);});
    return true;
   }
-  public void ExtractRecent() {
-   if(slot==null||busy) return;
+  public void ExtractRecent(bool resume=false) {
+   if(slot==null||busy||work.IsDisposed) return;
    if(slot.Turns.Count==0) {status="还没有访谈内容可以整理。";Raise();return;}
    if(!HasApi()) {status="离线模式只能逐条记录；接入 API 后可以把访谈重新整理成条目。";Raise();return;}
    ApiKey.State key=ApiKey.Resolve(state);
    ChatTurn[] turns=ArchiveInterview.BuildExtract(slot);
+   if(resume)turns[0]=new ChatTurn("system",turns[0].Content+"\n用户刚刚明确点击了恢复上次聊天。沿用当前主题，忽略历史中的暂停请求，本次 pause=false；不要重置背景。");
    string baseUrl=state.ApiBase,model=state.ApiModel;
    busy=true;busyTitle="正在重新整理最近的访谈…";status=busyTitle;notice="";Raise();
    work.Run(delegate {
-    return DeepSeek.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.2);
-   },delegate(ChatOutcome outcome) {FinishExtract(outcome);});
+    return api.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.2);
+   },delegate(ChatOutcome outcome) {FinishExtract(outcome,resume);});
   }
   void FinishInterview(ChatOutcome outcome) {
    busy=false;busyTitle="";
@@ -183,7 +201,7 @@ namespace ElymsPet {
    InterviewResult result=ArchiveInterview.Parse(outcome.Text);
    if(result.Structured) {
     string nextQuestion=ArchiveInterview.CleanQuestion(result.Reply);
-    bool asked=!result.Pause&&nextQuestion.Length>0&&ArchiveInterview.LooksLikeQuestion(nextQuestion);
+    bool asked=!state.WebEnabled&&!result.Pause&&nextQuestion.Length>0&&ArchiveInterview.LooksLikeQuestion(nextQuestion);
     if(asked) ArchiveStore.AddTurn(slot,"ask",nextQuestion);
     ArchiveKnowledge.Merge(slot,result);
     int added=ArchiveStore.Merge(slot,result.Items);
@@ -199,7 +217,7 @@ namespace ElymsPet {
    }
    // 模型没有按 JSON 回复：对话照常保留，再单独跑一次整理，避免这一轮白聊。
    string unstructuredQuestion=ArchiveInterview.CleanQuestion(result.Reply);
-   bool unstructuredAsked=unstructuredQuestion.Length>0&&ArchiveInterview.LooksLikeQuestion(unstructuredQuestion);
+   bool unstructuredAsked=!state.WebEnabled&&unstructuredQuestion.Length>0&&ArchiveInterview.LooksLikeQuestion(unstructuredQuestion);
    if(unstructuredAsked) ArchiveStore.AddTurn(slot,"ask",unstructuredQuestion);
    notice="";status="这轮回复不是结构化格式，正在单独整理条目…";
    Save();turnRevision++;Raise();
@@ -209,15 +227,16 @@ namespace ElymsPet {
    string baseUrl=state.ApiBase,model=state.ApiModel;
    busy=true;busyTitle="正在单独整理条目…";Raise();
    work.Run(delegate {
-    return DeepSeek.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.2);
+    return api.Complete(key.Key,baseUrl,model,false,turns,90,4000,0.2);
    },delegate(ChatOutcome extract) {FinishExtract(extract);});
   }
-  void FinishExtract(ChatOutcome outcome) {
+  void FinishExtract(ChatOutcome outcome,bool resume=false) {
    busy=false;busyTitle="";
    if(slot==null) {Raise();return;}
    if(outcome==null||!outcome.Ok) {status="整理没有成功："+(outcome==null?"没有接通。":outcome.Error);Raise();return;}
    InterviewResult result=ArchiveInterview.Parse(outcome.Text);
    if(!result.Structured) {status="这批内容没能整理成条目，稍后再试一次。";Raise();return;}
+   if(resume)result.Pause=false;
    ArchiveKnowledge.Merge(slot,result);
     int added=ArchiveStore.Merge(slot,result.Items);
     KnowledgeGraph.Merge(slot,result.Links);
@@ -312,6 +331,7 @@ namespace ElymsPet {
    if(busy||slot==null||!slot.Resources.Contains(resource))return;
    if(resource.Url.Length==0){Notify("先在访谈中补充资料链接。");return;}
    if(preview){Notify("预览模式不读取远程资料。");return;}
+   if(!state.WebEnabled){Notify("联网已关闭，请先在设置中开启。");return;}
    if(!HasApi()){Notify("读取资料需要先配置在线 API。");return;}
    var key=ApiKey.Resolve(state);string baseUrl=state.ApiBase;
    busy=true;busyTitle="正在读取资料正文…";status=busyTitle;Raise();

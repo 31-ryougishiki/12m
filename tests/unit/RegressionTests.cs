@@ -23,6 +23,7 @@ namespace ElymsPet {
     ArchiveKnowledgeTests.Run(root);
     ArchiveLearningTests.Run(root);
     KnowledgeGraphTests.Run(root);
+    ArchiveResearchTests.Run(root);
     MemoryRoundTrip(root);
     ConversationInputs(root);
     ChatCopyAffordance();

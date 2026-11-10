@@ -23,6 +23,7 @@ namespace ElymsPet {
   [DataMember] public string Role = "ask";
   [DataMember] public string Text = "";
   [DataMember] public DateTime At = DateTime.MinValue;
+  [DataMember] public string Sources = "";
  }
  [DataContract] public sealed class ArchiveSlot {
   [DataMember] public string Id = "";
@@ -62,7 +63,7 @@ namespace ElymsPet {
  public static class ArchiveStore {
   public const int MaxSlots = 20;
   public const int MaxItems = 300;
-  public const int MaxTurns = 60;
+  public const int MaxTurns = 1000;
   public const string DefaultName = "我的存档";
   static readonly string[] Levels = new string[]{"了解","会用","熟练","专长"};
   static readonly string[] StopTitles = new string[]{"无","暂无","没有","未知","空","none","null","n/a","na","没有新增","-","—"};
@@ -134,6 +135,7 @@ namespace ElymsPet {
      var turn=turns[i];if(turn==null) continue;
      string text=Clip(Clean(turn.Text),2000);if(text.Length==0) continue;
      var copy=new ArchiveTurn();copy.Role=turn.Role=="ask"?"ask":"answer";copy.Text=text;
+     copy.Sources=Clip((turn.Sources??"").Trim(),3000);
      copy.At=turn.At==DateTime.MinValue?DateTime.UtcNow:SafeUtc(turn.At);
      result.Add(copy);
     }
@@ -475,7 +477,7 @@ namespace ElymsPet {
    text.Append(Understanding).Append("\n").Append(ArchiveKnowledge.InterviewRules(slot));
    text.Append("访谈规则：\n1. 一次只问一个具体问题，能从对方上一句自然接下去；不要一次抛出多个问题，不要做成问卷。\n2. 先用一句话回应对方刚说的内容，再问下一个问题。\n3. 尽量覆盖这些方面：正在学什么、哪个领域有底气、常用工具或技能、做过什么完整的东西、学新东西的习惯、只是了解还没上手的方向。\n4. 对方说得模糊时，追问具体例子，不要替他补全，也不要夸大。\n5. 不要评价能力高低，不给学习计划，不替对方下人生结论。\n");
    text.Append(SchemaHint).Append("\n").Append(ArchiveKnowledge.Schema).Append(ArchiveLearning.Schema).Append(KnowledgeGraph.Schema);
-   text.Append("items 只收录对方这句话里明确说到的知识或技能及其知识边界；没有就输出空数组。不要编造对方没说的内容。没有明确说独立完成、已经发布、解决了某问题，就不要补上这些成果；遇到问题不等于已经掌握解决方法。\n");
+   text.Append("items 只收录对方这句话里明确说到的知识或技能及其知识边界；没有就输出空数组。不要编造对方没说的内容。提问者介绍的论文、源码原理和资料索引都不是用户能力证据；不能把提问中的事实当作用户已掌握。没有明确说独立完成、已经发布、解决了某问题，就不要补上这些成果；遇到问题不等于已经掌握解决方法。\n");
    string digest=ArchiveStore.Digest(slot,20,500);
    text.Append("当前画像：").Append(digest.Length>0?digest:"（还是空的，需要从头问起。）").Append("\n");
    text.Append("本轮必须只输出一个 JSON 对象：不要解释、不要 Markdown、不要代码块，第一个字符是 {，最后一个字符是 }。reply 里先回应对方，再问一个具体问题；如果用户已经拒绝访谈，就简短接受，不再追问，items 为空数组。\n");

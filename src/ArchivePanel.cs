@@ -16,6 +16,8 @@ namespace ElymsPet {
   TextBox archiveName,interviewLog,interviewInput,focusInput,knowledgeSearch;
   StackPanel resourceList,workflowList,episodeList,changeList;
   TextBlock focusStatus;
+  TextBlock resumeSummary,researchStatus,researchSources;
+  Button resumeButton;
   TextBlock archiveStatus,archiveNote,extractStatus,profileSummary,profileStats,interviewQuestion;
   StackPanel profileList;
   Button interviewSend,interviewAsk,extractButton;
@@ -77,15 +79,18 @@ namespace ElymsPet {
    var inputRow=new Grid();inputRow.ColumnDefinitions.Add(new ColumnDefinition());inputRow.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
    inputRow.Children.Add(interviewInput);Grid.SetColumn(interviewInput,0);inputRow.Children.Add(interviewSend);Grid.SetColumn(interviewSend,1);interviewSend.VerticalAlignment=VerticalAlignment.Top;
    focusInput=Ui.Input("",36);focusInput.Width=260;focusInput.MaxLength=100;focusInput.ToolTip="例如：模型部署、需求评审、论文复现";
+   resumeSummary=Ui.Text("",12,"#78616A");researchStatus=Ui.Text("",12,"#447969");researchSources=Ui.Text("",11,"#795F69");
+   resumeButton=Ui.Button("恢复上次聊天",delegate {archive.ResumeInterview();interviewInput.Focus();},true);
    var talk=Ui.Stack(
     Ui.Text("逐层了解你的工作经验",18,"#4F3B43"),
+    resumeSummary,Ui.Row(resumeButton),researchStatus,
     Ui.Text("从最近一项真实工作说起；会什么、哪里不熟悉，都可以直接说。流程会先保存为草稿。",12,"#78616A"),
     Ui.Text("本次想深入的主题（可选）",12,"#78616A"),
     Ui.Row(focusInput,Ui.Button("聚焦这个主题",delegate {if(!string.IsNullOrWhiteSpace(focusInput.Text))archive.Focus(focusInput.Text);},false)),
-    extractStatus,interviewQuestion,inputRow,
+    extractStatus,interviewQuestion,new Expander{Header="本轮查证状态与来源",Content=researchSources},inputRow,
     Ui.Row(Ui.Button("这部分不熟悉",delegate {interviewInput.Text="这部分我还不熟悉，不能独立完成。";interviewInput.Focus();},false),Ui.Button("跳过这个问题",delegate {archive.Focus(archive.Slot.Focus.Length>0?archive.Slot.Focus:"换一个工作方面，先了解背景");},false),Ui.Button("暂停访谈",delegate {archive.Pause();},false)),
     Ui.Row(interviewAsk,extractButton,Ui.Button("清空访谈记录",ClearInterview,false)),
-    Ui.Text("提问和整理会向已配置的 API 发送近期访谈、背景及资料索引。内容同时保存在本机，可随时查看。",11,"#795F69"),
+    Ui.Text("提问和整理会向 API 发送近期访谈与背景。开启联网时按需检索公开技术资料并缓存来源，每轮最多一次搜索、两次网页读取；可能产生额外 API 费用。资料不等于你已掌握的知识。",11,"#795F69"),
     new Expander{Header="查看访谈记录",Content=interviewLog});
    pages.Items.Add(new TabItem{Header="深入访谈",Content=Ui.Card(talk)});
    profileSummary=Ui.Text("",13,"#59434B");
@@ -164,6 +169,7 @@ namespace ElymsPet {
    if(interviewInput!=null)interviewInput.IsEnabled=ready;
    if(interviewAsk!=null){interviewAsk.IsEnabled=!busy;interviewAsk.Content=archive.Slot.Paused?"继续访谈":archive.HasQuestion?"继续当前问题":"开始 / 继续访谈";}
    if(extractButton!=null)extractButton.IsEnabled=!busy;
+   if(resumeButton!=null)resumeButton.IsEnabled=!busy&&archive.Slot.Turns.Count>0;
   }
   void SelectArchive(ArchiveSlot target) {
    if(target==null||archive.Busy)return;
@@ -175,11 +181,14 @@ namespace ElymsPet {
    ArchiveSlot slot=archive.Slot;
    if(slot==null)return;
    int start=Math.Max(0,slot.Turns.Count-40);
-   for(int i=start;i<slot.Turns.Count;i++)AppendInterview(slot.Turns[i].Role=="ask"?"曳尔沐":"你",slot.Turns[i].Text);
+   for(int i=start;i<slot.Turns.Count;i++)AppendInterview(slot.Turns[i].Role=="ask"?"曳尔沐":"你",slot.Turns[i].Text+(string.IsNullOrEmpty(slot.Turns[i].Sources)?"":"\n"+slot.Turns[i].Sources));
    interviewLog.ScrollToEnd();
   }
   void UpdateInterviewQuestion() {
    if(interviewQuestion==null)return;
+   if(resumeSummary!=null)resumeSummary.Text=archive.ResumeSummary;
+   if(researchStatus!=null)researchStatus.Text=archive.ResearchStatus;
+   if(researchSources!=null)researchSources.Text=archive.LatestSources.Length>0?archive.LatestSources:"这条问题没有联网查证记录；旧版本的问题会保留，回答后再按当前设置继续。";
    if(focusStatus!=null)focusStatus.Text=archive.Slot.Name+" · "+(archive.Slot.Paused?"已暂停 · ":"当前主题 · ")+(archive.Slot.Focus.Length==0?"建立工作背景":archive.Slot.Focus);
    string asked=archive.LatestQuestion;
    interviewQuestion.Text=asked.Length>0?"当前问题："+asked:"还没有问题。点「让曳尔沐提问」，由 DeepSeek 主动问一个。";
@@ -293,7 +302,7 @@ namespace ElymsPet {
    if(Ask("清空「"+slot.Name+"」的个人画像？\n会删除全部 "+slot.Items.Count+" 条知识记录，访谈记录会保留。","清空画像",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return;
    archive.ClearProfile();
   }
-  void ClearInterview() {archive.ClearTurns();}
+  void ClearInterview() {if(Ask("清空当前存档的访谈记录后，将无法恢复这段聊天。知识条目仍保留。确定清空？","清空访谈",MessageBoxButton.YesNo,MessageBoxImage.Warning)==MessageBoxResult.Yes)archive.ClearTurns();}
   void AskNext() {
    if(archive.Busy)return;
    archive.AskNext();

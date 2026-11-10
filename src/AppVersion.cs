@@ -6,7 +6,7 @@ using System.Reflection;
 
 namespace ElymsPet {
  public static class AppVersion {
-  public const string Value = "2.0.9";
+  public const string Value = "2.0.10";
   public const string UserAgent = "ElymsDesktopPet/" + Value;
  }
 }

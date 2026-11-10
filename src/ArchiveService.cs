@@ -339,7 +339,8 @@ namespace ElymsPet {
     busy=false;busyTitle="";
     if(outcome==null||!outcome.Ok){Notify("资料读取失败："+(outcome==null?"无响应":outcome.Error));return;}
     resource.Content=outcome.Content;resource.Retrieved=DateTime.UtcNow;
-    status="可读正文已缓存到本地资料库（API 最多返回 20000 字符，不代表完整仓库或论文全文）。";
+    DeepSeekShare.Cache(slot,outcome);
+    status="可读正文已缓存到本地资料库（最多保存 20000 字符，不代表完整仓库或论文全文）。"+outcome.AttachmentStatus;
     Save();profileRevision++;Raise();
    });
   }

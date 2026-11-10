@@ -279,7 +279,7 @@ namespace ElymsPet {
    if(outcome.Kind==WebKind.Fetch) run.Seen.Add(new WebSource{title=outcome.Title,url=outcome.Url});
    else if(outcome.Results!=null) run.Seen.AddRange(outcome.Results);
    run.Evidence+=WebApi.ModelEvidence(run.Intent,outcome);
-   Add(new ChatLine(ChatSpeaker.Notice,outcome.Kind==WebKind.Fetch?"已读取网页正文 · 正在整理…":"已取回 "+outcome.SourceCount+" 条公开网页资料 · 正在整理…",""));
+   Add(new ChatLine(ChatSpeaker.Notice,outcome.Kind==WebKind.Fetch?"已读取网页正文 · "+outcome.AttachmentStatus+" 正在整理…":"已取回 "+outcome.SourceCount+" 条公开网页资料 · 正在整理…",""));
    ChatTurn[] turns=BuildTurns(run.User,run.Memory,run.Evidence);
    string key=ApiKey.Resolve(state).Key,baseUrl=state.ApiBase,model=state.ApiModel;
    LastHint="正在整理联网结果…";LastMeta=LastHint;Raise();

@@ -17,6 +17,8 @@ namespace ElymsPet {
   public string Url = "";
   public string Title = "";
   public string Content = "";
+  public string PageText = "",AttachmentStatus = "";
+  public readonly System.Collections.Generic.List<ShareAttachment> Attachments = new System.Collections.Generic.List<ShareAttachment>();
   public WebSource[] Results;
   public string Error = "";
   public string Detail = "";
@@ -154,6 +156,7 @@ namespace ElymsPet {
    string key = ApiKey.Clean(apiKey);
    url = (url ?? "").Trim();
    if (!SafeUrl(url)) return WebOutcome.Fail(WebKind.Fetch,"请提供一个 http 或 https 开头的网页地址。","invalid url",0,0);
+   if (DeepSeekShare.CanRead(url)) return DeepSeekShare.Fetch(url,timeoutSeconds);
    if (url.Length > 2048) url = url.Substring(0,2048);
    if (!ApiKey.Valid(key)) return WebOutcome.Fail(WebKind.Fetch,"还没有配置 API Key。打开「设置」填入密钥，就能读取网页。","missing key",0,0);
    if (!DeepSeek.ValidBaseUrl(baseUrl)) return WebOutcome.Fail(WebKind.Fetch,"接口地址不完整，请检查「接口地址」。","invalid base url",0,0);
@@ -269,7 +272,7 @@ namespace ElymsPet {
    if (outcome.Kind == WebKind.Fetch) {
     text.Append("【网页读取】").Append(ClipText(outcome.Title,160)).Append("\n");
     text.Append("URL: ").Append(ClipText(outcome.Url,600)).Append("\n");
-    text.Append("正文节选：\n").Append(ClipText(outcome.Content,6500)).Append("\n");
+    text.Append("正文节选：\n").Append(outcome.AttachmentStatus.Length>0?DeepSeekShare.Evidence(outcome,8000):ClipText(outcome.Content,6500)).Append("\n");
    } else {
     text.Append("【联网搜索】查询：").Append(ClipText(query,128)).Append("；共 ").Append(outcome.SourceCount).Append(" 条结果。\n\n");
     if (outcome.Results != null) {

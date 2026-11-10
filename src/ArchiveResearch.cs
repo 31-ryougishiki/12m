@@ -108,7 +108,12 @@ namespace ElymsPet {
   }
   static void Read(IArchiveApi api,PetState state,string key,string url,ArchiveResearchResult result,StringBuilder evidence) {
    WebOutcome page=api.Fetch(key,state.ApiBase,url);
-   if(page!=null&&page.Ok&&!string.IsNullOrWhiteSpace(page.Content))Add(result,evidence,url,page.Title,page.Content,"联网读取的外部参考，不代表用户掌握；保存可读正文节选，不是完整代码仓或论文。");
+   if(page==null||!page.Ok||string.IsNullOrWhiteSpace(page.Content))return;
+   if(page.AttachmentStatus.Length>0) {
+    Add(result,new StringBuilder(),url,page.Title,page.PageText+"\n"+page.AttachmentStatus,"分享页及附件索引，外部参考，不代表用户掌握。");
+    DeepSeekShare.Cache(new ArchiveSlot{Resources=result.Resources},page);
+    evidence.Append(DeepSeekShare.Evidence(page,9000));
+   }else Add(result,evidence,url,page.Title,page.Content,"联网读取的外部参考，不代表用户掌握；保存可读正文节选，不是完整代码仓或论文。");
   }
   static void Add(ArchiveResearchResult result,StringBuilder evidence,string url,string title,string content,string note) {
    if(string.IsNullOrWhiteSpace(content))return;
@@ -124,7 +129,11 @@ namespace ElymsPet {
    foreach(var r in result.Resources) {
     var old=slot.Resources.Find(delegate(ArchiveResource x){return x.Url==r.Url;});
     if(old==null)slot.Resources.Add(r);
-    else {old.Content=r.Content;old.Retrieved=r.Retrieved;if(old.Note.Length==0)old.Note=r.Note;}
+    else {
+     if(r.Content.Length>0){old.Content=r.Content;old.Retrieved=r.Retrieved;}
+     if(r.Note.StartsWith("分享附件",StringComparison.Ordinal))old.Note=r.Note+(r.Content.Length==0&&old.Content.Length>0?" 保留上次缓存，非本次读取结果。":"");
+     else if(old.Note.Length==0)old.Note=r.Note;
+    }
    }
   }
  }

@@ -20,7 +20,7 @@ Windows 同人桌宠，采用当前银白发副官造型，提供九种 Q 版姿
 
 ## 当前维护版本
 
-当前版本 **2.0.10**。存档访谈支持按需联网查证、分类缓存来源，以及恢复上次聊天；已有主题、未回答问题和知识库继续保留。操作与验证见 [存档联网与恢复聊天](docs/archive-online-resume.md)。
+当前版本 **2.0.11**。支持读取 DeepSeek 分享页里的公开文本附件，普通聊天和存档访谈均可使用，并显示每个附件的读取状态；见 [分享附件读取](docs/share-attachments.md)。此前的 [存档联网与恢复聊天](docs/archive-online-resume.md) 保持兼容。
 
 历史功能更新见 [更新记录](CHANGELOG.md)，代码结构与扩展约定见 [开发说明](docs/architecture.md)。
 

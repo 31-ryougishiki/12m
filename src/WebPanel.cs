@@ -153,7 +153,7 @@ namespace ElymsPet {
     AddMessage("读取没有完成",outcome==null?"没有收到网页内容。":outcome.Error,"#A63C51");
     return;
    }
-   status.Text="● 已读取 "+outcome.Content.Length+" 字 · "+outcome.Seconds.ToString("0.0")+"s";
+   status.Text="● 已读取 "+outcome.Content.Length+" 字 · "+outcome.Seconds.ToString("0.0")+"s · "+outcome.AttachmentStatus;
    results.Children.Clear();
    var card=new Border{Background=Ui.Brush("#FFFCF9"),BorderBrush=Ui.Brush("#E9D6CF"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(13),Padding=new Thickness(14),Margin=new Thickness(0,0,0,12)};
    var panel=new StackPanel();

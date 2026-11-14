@@ -17,9 +17,10 @@ namespace ElymsPet {
   public static string SystemPrompt(PetState state,DateTime now,string profileDigest,string dshContext,string webContext,string memoryContext) {
    var text=new StringBuilder();
    text.Append(CharacterPersona.Prompt);
+   text.Append(SourceResearch.AnswerRules);
    string dsh=(dshContext??"").Replace("\r"," ").Replace("\n"," ").Trim();
    if(dsh.Length>400)dsh=dsh.Substring(0,400)+"…";
-   bool dshOnline=dsh.StartsWith("DSH 工作台在线",StringComparison.Ordinal);
+   bool dshOnline=dsh.StartsWith("DSH 工作台在线",StringComparison.Ordinal)||dsh.StartsWith("检测到 DSH 工作台入口",StringComparison.Ordinal);
    string web=(webContext??"").Replace("\r"," ").Replace("\n"," ").Trim();
    if(web.Length>400)web=web.Substring(0,400)+"…";
    bool webOnline=web.StartsWith("联网可用",StringComparison.Ordinal);

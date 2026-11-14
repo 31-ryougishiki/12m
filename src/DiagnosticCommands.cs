@@ -10,6 +10,12 @@ using System.Windows.Media.Imaging;
 
 namespace ElymsPet {
  internal static class DiagnosticCommands {
+  internal static int StreamCheck() {
+   var state=Storage.Load();var key=ApiKey.Resolve(state);int updates=0;string partial="";
+   var outcome=DeepSeek.Complete(key.Key,state.ApiBase,state.ApiModel,true,new[]{new ChatTurn("user","这是流式连通性测试，请用三句话解释专注计时，不要调用工具。")},45,1024,0.3,"low",4000,delegate(string text){updates++;partial=text;});
+   bool pass=outcome.Ok&&updates>0&&partial.Trim()==outcome.Text;
+   Directory.CreateDirectory("tests");File.WriteAllText(Path.Combine("tests","stream-test.txt"),(pass?"PASS":"FAIL")+"\r\nupdates="+updates+"\r\nseconds="+outcome.Seconds.ToString("0.00")+"\r\nstatus="+outcome.Status+"\r\nerror="+outcome.Error+"\r\n",Encoding.UTF8);return pass?0:1;
+  }
   internal static int RunOfflineTests() {
    string runner=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ElymsPet.Tests.exe");
    if(!File.Exists(runner)) {Console.Error.WriteLine("请先运行 build.ps1 -Tests 或 test.ps1，生成独立离线测试程序。");return 2;}

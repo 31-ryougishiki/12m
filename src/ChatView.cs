@@ -15,11 +15,15 @@ namespace ElymsPet {
   readonly StackPanel stack=new StackPanel();
   readonly StackPanel emptyPanel=new StackPanel();
   readonly TextBlock emptyText;
+  readonly TextBlock activityText=new TextBlock();
+  readonly Border activity=new Border();
   readonly bool compact;
   ChatSpeaker lastSpeaker=ChatSpeaker.Notice;
   public double BubbleMaxWidth;
   public ChatView(bool compact) {
    this.compact=compact;
+   activityText.FontSize=compact?12:13;activityText.Foreground=Theme.Lav;activityText.TextWrapping=TextWrapping.Wrap;
+   activity.Child=activityText;activity.Background=Theme.HerBubble;activity.BorderBrush=Theme.HerBorder;activity.BorderThickness=new Thickness(1);activity.Padding=new Thickness(12,9,12,9);activity.Margin=new Thickness(0,0,0,10);activity.HorizontalAlignment=HorizontalAlignment.Left;
    BubbleMaxWidth=compact?300:440;
    scroller.VerticalScrollBarVisibility=ScrollBarVisibility.Auto;
    scroller.HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled;
@@ -31,7 +35,7 @@ namespace ElymsPet {
    Children.Add(scroller);
    emptyPanel.HorizontalAlignment=HorizontalAlignment.Center;
    emptyPanel.Margin=new Thickness(0,compact?14:26,0,compact?14:26);
-   emptyPanel.Children.Add(new TextBlock{Text="信号已接通",FontSize=compact?10.5:11.5,Foreground=Theme.Brush("#447969"),HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,0,0,5)});
+   emptyPanel.Children.Add(new TextBlock{Text="我在这里",FontSize=compact?12:14,Foreground=Theme.Brush("#447969"),HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,0,0,5)});
    emptyText=new TextBlock{Text="想说什么，直接写下来就好。",FontSize=compact?11:12,Foreground=Theme.TextDim,TextAlignment=TextAlignment.Center,TextWrapping=TextWrapping.Wrap,MaxWidth=compact?280:360};
    emptyPanel.Children.Add(emptyText);
    ShowEmpty("想说什么，直接写下来就好。");
@@ -49,10 +53,20 @@ namespace ElymsPet {
    if(stack.Children.Count==1&&ReferenceEquals(stack.Children[0],emptyPanel))stack.Children.Clear();
    bool follow=line.Speaker!=ChatSpeaker.Notice||lastSpeaker==ChatSpeaker.User;
    UIElement element=Build(line);
-   stack.Children.Add(element);
+   int pending=stack.Children.IndexOf(activity);if(pending<0)stack.Children.Add(element);else stack.Children.Insert(pending,element);
    lastSpeaker=line.Speaker;
    while(stack.Children.Count>80)stack.Children.RemoveAt(0);
    if(follow)ScrollEnd();
+  }
+  public void SetActivity(string message){
+   message=(message??"").Trim();bool visible=stack.Children.Contains(activity);
+   if(message.Length==0){if(visible)stack.Children.Remove(activity);activityText.Text="";return;}
+   if(stack.Children.Contains(emptyPanel))stack.Children.Remove(emptyPanel);
+   string label=message.StartsWith("正在回复")?message:"◌ 曳尔沐正在思考 · "+message;if(visible&&activityText.Text==label)return;
+   activityText.MaxWidth=BubbleMaxWidth;activityText.Text=label;
+   bool follow=scroller.ScrollableHeight-scroller.VerticalOffset<20;
+   if(!visible)stack.Children.Add(activity);
+   if(!visible||follow)ScrollEnd();
   }
   void ScrollEnd() {
    Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(delegate {
@@ -64,15 +78,15 @@ namespace ElymsPet {
    if(line.Speaker==ChatSpeaker.Notice)return Notice(line.Text);
    bool mine=line.Speaker==ChatSpeaker.User;
    var block=new StackPanel{HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left,Margin=new Thickness(0,0,0,compact?9:11)};
-   var label=new TextBlock{FontSize=compact?9.5:10.5,Foreground=mine?Theme.Brush("#447969"):Theme.Lav,Margin=new Thickness(mine?0:2,mine?0:2,mine?2:0,3),HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left};
+   var label=new TextBlock{FontSize=compact?10.5:11.5,FontWeight=FontWeights.SemiBold,Foreground=mine?Theme.UserText:Theme.HerText,Margin=new Thickness(mine?0:2,mine?0:2,mine?2:0,3),HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left};
    label.Inlines.Add(new Run(mine?"你":"曳尔沐"));
-   var time=new Run("  "+line.Time.ToString("HH:mm")){Foreground=Theme.TextDim,FontSize=compact?8.5:9.5};
+   var time=new Run("  "+line.Time.ToString("HH:mm")){Foreground=Theme.TextDim,FontSize=12};
    label.Inlines.Add(time);
    block.Children.Add(label);
    var text=new TextBox{
     Text=line.Text,IsReadOnly=true,IsReadOnlyCaretVisible=false,AcceptsReturn=true,
-    TextWrapping=TextWrapping.Wrap,FontFamily=Theme.Font,FontSize=compact?12.5:13.5,
-    Foreground=mine?Theme.UserText:Theme.TextMain,
+    TextWrapping=TextWrapping.Wrap,FontFamily=Theme.ReadingFont,FontSize=compact?13:15,
+    Foreground=mine?Theme.UserText:Theme.HerText,
     Background=Brushes.Transparent,BorderThickness=new Thickness(0),Padding=new Thickness(0),
     MaxWidth=BubbleMaxWidth,MinWidth=0,MinHeight=0,IsTabStop=false,Cursor=Cursors.IBeam,
     VerticalContentAlignment=VerticalAlignment.Top,FocusVisualStyle=null,
@@ -95,7 +109,7 @@ namespace ElymsPet {
    bubble.ContextMenu=CopyMenu(line.Text);
    block.Children.Add(bubble);
    if(!string.IsNullOrEmpty(line.Meta)) {
-    block.Children.Add(new TextBlock{Text=line.Meta,FontSize=compact?8.5:9.5,Foreground=Theme.TextDim,Margin=new Thickness(mine?0:3,3,mine?3:0,0),HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left});
+    block.Children.Add(new TextBlock{Text=line.Meta,FontSize=12,Foreground=Theme.TextDim,Margin=new Thickness(mine?0:3,3,mine?3:0,0),HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left});
    }
    return block;
   }
@@ -105,11 +119,11 @@ namespace ElymsPet {
     Background=Theme.Brush("#F6EEE8"),
     BorderBrush=Theme.Brush("#E7D6CE"),
     BorderThickness=new Thickness(1),
-    CornerRadius=new CornerRadius(10),
+    CornerRadius=new CornerRadius(0),
     Padding=new Thickness(compact?9:11,compact?5:6,compact?10:12,compact?5:6),
     Margin=new Thickness(0,0,0,compact?9:11),
     HorizontalAlignment=source?HorizontalAlignment.Stretch:HorizontalAlignment.Center,
-    Child=new TextBlock{Text=text,TextWrapping=TextWrapping.Wrap,TextAlignment=source?TextAlignment.Left:TextAlignment.Center,FontSize=compact?10:11,LineHeight=compact?16:18,Foreground=Theme.TextDim,MaxWidth=source?520:(compact?300:420)}
+    Child=new TextBlock{Text=text,TextWrapping=TextWrapping.Wrap,TextAlignment=source?TextAlignment.Left:TextAlignment.Center,FontSize=12,LineHeight=compact?16:18,Foreground=Theme.TextDim,MaxWidth=source?520:(compact?300:420)}
    };
    var menu=MenuTheme.Create();
    var copy=MenuTheme.Item("复制这条消息","\uE8C8",null);
@@ -149,14 +163,14 @@ namespace ElymsPet {
 
  /// <summary>渐变薄荷色的圆形发送键。</summary>
  public sealed class SendButton : Border {
-  static readonly Brush Rest=Theme.Grad("#C87990","#AD506B",45);
-  static readonly Brush Hover=Theme.Grad("#D48BA0","#BF6C85",45);
+  static readonly Brush Rest=Theme.Brush("#5368B2");
+  static readonly Brush Hover=Theme.Brush("#008D83");
   readonly Action send;
   bool ready;
   public SendButton(Action action,double size) {
    send=action;
-   Width=size;Height=size;CornerRadius=new CornerRadius(size/2);
-   Background=Rest;BorderBrush=Theme.Brush("#D29BAE");BorderThickness=new Thickness(1);
+   Width=size;Height=size;CornerRadius=new CornerRadius(0);
+   Background=Rest;BorderBrush=Theme.Brush("#334363");BorderThickness=new Thickness(1);
    ToolTip="发送（Enter）";
    Child=new TextBlock{Text="↑",FontSize=size*.5,FontWeight=FontWeights.Bold,Foreground=Theme.Brush("#FFFFFF"),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center,TextAlignment=TextAlignment.Center};
    MouseEnter+=delegate {if(ready)Background=Hover;};
@@ -183,10 +197,11 @@ namespace ElymsPet {
    var box=new TextBox{
     Background=Brushes.Transparent,BorderThickness=new Thickness(0),
     Foreground=Theme.TextMain,CaretBrush=Theme.Accent,SelectionBrush=Theme.Brush("#66E5B2C5"),
-    FontFamily=Theme.Font,FontSize=13,TextWrapping=TextWrapping.Wrap,AcceptsReturn=true,
+    FontFamily=Theme.ReadingFont,FontSize=13,TextWrapping=TextWrapping.Wrap,AcceptsReturn=true,
     MaxLength=4000,VerticalContentAlignment=VerticalAlignment.Center,FocusVisualStyle=null
    };
    TextOptions.SetTextFormattingMode(box,TextFormattingMode.Display);
+   ClipboardEditing.Attach(box);
    box.ContextMenu=InputMenu(box);
    return box;
   }
@@ -213,3 +228,5 @@ namespace ElymsPet {
   }
  }
 }
+
+

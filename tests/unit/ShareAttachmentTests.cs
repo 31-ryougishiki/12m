@@ -25,6 +25,20 @@ namespace ElymsPet {
    string evidence=WebApi.ModelEvidence(Share,outcome);
    Check(evidence.Contains("FIRST_END")&&evidence.Contains("SECOND_END")&&evidence.Contains("只是参考资料"),"model receives both scripts as untrusted data");
    Check(WebApi.BuildAnswerPrompt("比较附件",evidence).Contains("SECOND_END"),"final chat prompt retains second attachment");
+   string guide="GUIDE_START\n"+new string('流',3400)+"\nGUIDE_END";byte[] wiki=Encoding.UTF8.GetBytes("WIKI_START\n"+new string('网',8900)+"\nWIKI_END");
+   string mixed=ShareJson(FileJson("wiki","network.txt",wiki.Length)).Replace("\"role\":\"USER\",\"fragments\":[","\"role\":\"USER\",\"fragments\":[{\"type\":\"REQUEST\",\"content\":"+GraphEditing.Json(guide)+"},");
+   var full=DeepSeekShare.Fetch(Share,30,new Download(mixed,wiki));string fullEvidence=WebApi.ModelEvidence(Share,full);
+   Check(full.PageText.Contains(guide)&&full.Attachments[0].Text.EndsWith("WIKI_END"),"REQUEST guide and attached wiki are both read completely");
+   Check(fullEvidence.Contains(guide)&&fullEvidence.Contains(Encoding.UTF8.GetString(wiki)),"model evidence preserves full 3K guide and 9K attachment without a second cutoff");
+   Check(WebApi.BuildAnswerPrompt("整理测试流程",fullEvidence).Contains("GUIDE_END")&&WebApi.BuildAnswerPrompt("整理测试流程",fullEvidence).Contains("WIKI_END"),"final answer prompt retains both document endings");
+   var fullApi=new ResearchApi(full);var fullSlot=ArchiveStore.NewSlot("full-guide");var fullResearch=ArchiveResearch.Ask(fullApi,new PetState{WebEnabled=true},"test",ArchiveInterview.BuildQuestion(fullSlot),"整理测试流程",new List<string>{Share});
+   Check(fullApi.LastInput.Contains(guide)&&fullApi.LastInput.Contains("WIKI_END"),"archive research receives the guide and full attachment too");
+   var textOnly=DeepSeekShare.Fetch(Share,30,new Download(ShareJson().Replace("\"role\":\"USER\",\"fragments\":[","\"role\":\"USER\",\"fragments\":[{\"type\":\"REQUEST\",\"content\":"+GraphEditing.Json(guide)+"},")));
+   Check(textOnly.Content.Contains("GUIDE_END"),"text-only share no longer loses content after the old 3000-character cap");
+   var answerApi=new AnswerApi();var answered=WebAnswerCompletion.Complete(answerApi,"test","https://example.org","test",new[]{new ChatTurn("user",fullEvidence)});
+   Check(answerApi.Calls==2&&answerApi.Budgets[0]==8192&&answerApi.Budgets[1]==16384&&answered.Ok&&!answered.Truncated&&answerApi.LastInput.Contains("WIKI_END"),"truncated web answer retries with full original evidence and sufficient output budget");
+   answerApi=new AnswerApi{AlwaysTruncated=true};answered=WebAnswerCompletion.Complete(answerApi,"test","https://example.org","test",new[]{new ChatTurn("user",fullEvidence)});
+   Check(!answered.Ok&&answerApi.Calls==2,"repeated truncation reports incomplete instead of saving a half workflow");
    var researchApi=new ResearchApi(outcome);var researchSlot=ArchiveStore.NewSlot("deploy");ArchiveStore.AddTurn(researchSlot,"answer",Share);
    var research=ArchiveResearch.Ask(researchApi,new PetState{WebEnabled=true},"test",ArchiveInterview.BuildQuestion(researchSlot),ArchiveResearch.Context(researchSlot),new List<string>{Share});
    Check(researchApi.LastInput.Contains("FIRST_END")&&researchApi.LastInput.Contains("SECOND_END")&&research.Resources.Count==3,"interview receives both files and caches separate resource cards");
@@ -60,6 +74,11 @@ namespace ElymsPet {
    Check(DeepSeekShare.Decode(Encoding.GetEncoding(54936).GetBytes("中文 GB18030"),"text/plain")=="中文 GB18030","GB18030 fallback supported");
    bool rejected=false;try{DeepSeekShare.Decode(new byte[]{65,0,66},"application/octet-stream");}catch(InvalidDataException){rejected=true;}Check(rejected,"binary file disguised as text rejected");
    Console.WriteLine("PASS share attachment: "+checks+" checks");
+  }
+  sealed class AnswerApi:IArchiveApi {
+   public int Calls;public bool AlwaysTruncated;public List<int> Budgets=new List<int>();public string LastInput;
+   public ChatOutcome Complete(string key,string url,string model,bool thinking,ChatTurn[] turns,int timeout,int tokens,double temperature){Calls++;Budgets.Add(tokens);LastInput=string.Join("\n",turns.Select(t=>t.Content).ToArray());return new ChatOutcome{Ok=true,Text="流程结果",Truncated=AlwaysTruncated||Calls==1};}
+   public WebOutcome Search(string a,string b,string c){throw new Exception("must not refetch");}public WebOutcome Fetch(string a,string b,string c){throw new Exception("must not refetch");}
   }
   sealed class Download:IPublicDownloader {
    readonly string json;readonly Queue<byte[]> bodies;public bool Html;public readonly List<string> Urls=new List<string>();

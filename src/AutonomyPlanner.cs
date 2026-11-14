@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.Serialization;
@@ -29,7 +29,7 @@ namespace ElymsPet {
      user.Append("对方的存档画像：").Append(string.IsNullOrEmpty(digest)?"（还没有）":Clip(digest,500)).Append("\n");
      user.Append("你可以自己决定这段时间做什么。可选：\n");
      user.Append("chat：主动找对方说一句 20—80 字的话；\n");
-     user.Append("bili：自己去 B站 逛逛，topic 写 2—20 字搜索词（可以为空）；\n");
+     if(state==null||PluginAccess.Enabled(state,"bili"))user.Append("bili：自己去 B站 逛逛，topic 写 2—20 字搜索词（可以为空）；\n");
      user.Append("note：写一段 50—200 字的自己的观察 / 计划；\n");
      if(dshAllowed) user.Append("dsh：让 DSH 在 autonomy/ 目录做一个小实验，task 写清楚目标；\n");
      user.Append("rest：这次什么都不做，发一会儿呆。\n");

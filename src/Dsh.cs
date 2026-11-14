@@ -87,6 +87,7 @@ namespace ElymsPet {
    if(value==null) {if(error.Length==0)error="没有找到 dsh-bridge.json";return null;}
    if(value.port<=0||value.port>65535) {error="握手文件端口无效";return null;}
    if(string.IsNullOrEmpty(value.token)||value.token.Length<16) {error="握手文件 token 无效";return null;}
+   if(value.pid>0)try {using(var process=System.Diagnostics.Process.GetProcessById(value.pid)){if(process.HasExited){error="DSH 进程已退出";return null;}}}catch{error="DSH 进程已退出，请重新启动 DSH";return null;}
    if(string.IsNullOrEmpty(value.workspace)) value.workspace=Storage.Folder;
    return value;
   }
@@ -94,16 +95,19 @@ namespace ElymsPet {
    if(state==null||!state.DshEnabled) return "DSH 委托已在设置里关闭。";
    string error;var handshake=ReadHandshake(out error);
    if(handshake==null) return "现在没有检测到 DSH 工作台（"+error+"）。如果用户要求实际动手，先说明需要打开 DSH。";
-   return "DSH 工作台在线，工作区："+handshake.workspace+"。";
+   return "检测到 DSH 工作台入口，工作区："+handshake.workspace+"。提交时会检查连接，不能仅凭入口断言任务已经执行。";
   }
   public static string Clip(string text,int max) {
    text=(text??"").Trim();
    return text.Length<=max?text:text.Substring(0,max)+"…";
   }
-  public static DshJob Start(string task,string permission,string title) {
+  public static DshJob Start(string task,string permission,string title,DshKnowledgeManifest knowledge=null) {
    string error;var handshake=ReadHandshake(out error);
    if(handshake==null) return ErrorJob("DSH 桥接没有运行："+error,task,permission);
-   var request=new DshTaskRequest {prompt=task,permission=permission,cwd=handshake.workspace,title=title??""};
+   var request=new DshTaskRequest {prompt=task,permission=permission,cwd=handshake.workspace,title=title??"",knowledge=knowledge};
+   // Older running bridges whitelist nine derived files. Carry the new editing
+   // protocol as an explicit task reference so an upgrade need not stop DSH jobs.
+   if(knowledge!=null){var compatible=new List<DshKnowledgeFile>();foreach(var entry in knowledge.files){if(Path.GetFileName(entry.path)=="GRAPH_EDIT.md")request.prompt+="\n\n若本次任务涉及编辑知识图谱，先读取编辑协议："+GraphEditing.Json(entry.path)+"。按协议提交并读取同 RequestId 的保存结果；不得直接覆盖派生 graph.json。";else compatible.Add(entry);}request.knowledge=new DshKnowledgeManifest{archive=knowledge.archive,root=knowledge.root,files=compatible.ToArray()};}
    string body;
    try {body=Serialize(request);} catch(Exception e) {return ErrorJob("准备 DSH 任务失败："+e.Message,task,permission);}
    string response;int status;string requestError;
@@ -149,6 +153,17 @@ namespace ElymsPet {
     if(health==null||!health.ok) return new DshHealthResult {Ok=false,Error="DSH 桥接没有正常响应"};
     return new DshHealthResult {Ok=true,Workspace=health.workspace??handshake.workspace,WebUrl=health.webUrl??handshake.webUrl};
    } catch(Exception e) {return new DshHealthResult {Ok=false,Error="DSH 健康检查格式不对："+e.Message};}
+  }
+  public static string BrowserUrl() {
+   string error;var handshake=ReadHandshake(out error);
+   if(handshake==null)throw new IOException("DSH 桥接没有运行，请先启动 DSH。");
+   string response;int status;
+   if(!Send("GET",BaseUrl(handshake)+"/open",handshake.token,null,5000,out response,out status,out error))throw new IOException(status==404?"DSH 桥接需要更新后重启，才能打开新版访问入口。":Describe(status,error));
+   DshOpenResponse result;
+   try {result=Deserialize<DshOpenResponse>(response);}catch{throw new IOException("DSH 打开入口返回格式无效。");}
+   Uri uri;
+   if(result==null||!Uri.TryCreate(result.url,UriKind.Absolute,out uri)||!uri.IsLoopback||(uri.Scheme!="http"&&uri.Scheme!="https"))throw new IOException("DSH 没有返回有效的本机访问入口。");
+   return uri.AbsoluteUri;
   }
   static DshJob ErrorJob(string error,string task,string permission) {
    return new DshJob {Status="error",Error=error??"",Task=task??"",Permission=permission??"",UpdatedAt=DateTime.Now};
@@ -220,11 +235,13 @@ namespace ElymsPet {
   public string WebUrl="";
  }
  [DataContract] sealed class DshTaskRequest {
+  [DataMember(EmitDefaultValue=false)] public DshKnowledgeManifest knowledge;
   [DataMember] public string prompt;
   [DataMember] public string permission;
   [DataMember] public string cwd;
   [DataMember(EmitDefaultValue=false)] public string title;
  }
+ [DataContract] sealed class DshOpenResponse { [DataMember] public string url; }
  [DataContract] sealed class DshTaskResponse {
   [DataMember] public string jobId;
   [DataMember] public string sessionId;

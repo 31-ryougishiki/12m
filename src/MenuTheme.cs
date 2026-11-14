@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Markup;
@@ -17,7 +17,7 @@ namespace ElymsPet {
  </Style>
  <Style x:Key='{x:Static MenuItem.SeparatorStyleKey}' TargetType='Separator' BasedOn='{StaticResource {x:Type Separator}}'/>
  <Style TargetType='MenuItem'>
-  <Setter Property='Foreground' Value='#59434B'/>
+  <Setter Property='Foreground' Value='#29324B'/>
   <Setter Property='Background' Value='Transparent'/>
   <Setter Property='FontSize' Value='13'/>
   <Setter Property='Padding' Value='10,9'/>
@@ -26,20 +26,20 @@ namespace ElymsPet {
    <Setter.Value>
     <ControlTemplate TargetType='MenuItem'>
      <Grid>
-      <Border x:Name='Row' Background='{TemplateBinding Background}' CornerRadius='8' Margin='0,1' Padding='{TemplateBinding Padding}'>
+      <Border x:Name='Row' Background='{TemplateBinding Background}' CornerRadius='0' Margin='0,1' Padding='{TemplateBinding Padding}'>
        <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width='27'/><ColumnDefinition Width='*'/><ColumnDefinition Width='Auto'/><ColumnDefinition Width='16'/></Grid.ColumnDefinitions>
         <ContentPresenter x:Name='Icon' ContentSource='Icon' VerticalAlignment='Center'/>
-        <Border x:Name='CheckBox' Width='16' Height='16' HorizontalAlignment='Left' VerticalAlignment='Center' CornerRadius='5' BorderBrush='#C18A9A' BorderThickness='1' Visibility='Collapsed'>
+        <Border x:Name='CheckBox' Width='16' Height='16' HorizontalAlignment='Left' VerticalAlignment='Center' CornerRadius='0' BorderBrush='#C18A9A' BorderThickness='1' Visibility='Collapsed'>
          <Path x:Name='Tick' Data='M 3,7 L 6,10 L 12,4' Stroke='White' StrokeThickness='1.6' Visibility='Collapsed'/>
         </Border>
         <ContentPresenter Grid.Column='1' ContentSource='Header' RecognizesAccessKey='True' VerticalAlignment='Center'/>
-        <TextBlock Grid.Column='2' Text='{TemplateBinding InputGestureText}' Foreground='#795F69' FontSize='10.5' Margin='20,0,0,0' VerticalAlignment='Center'/>
+        <TextBlock Grid.Column='2' Text='{TemplateBinding InputGestureText}' Foreground='#59647E' FontSize='10.5' Margin='20,0,0,0' VerticalAlignment='Center'/>
         <Path x:Name='Arrow' Grid.Column='3' Data='M 0,0 L 4,4 L 0,8' Stroke='#987382' StrokeThickness='1.3' HorizontalAlignment='Right' VerticalAlignment='Center' Visibility='Collapsed'/>
        </Grid>
       </Border>
       <Popup x:Name='PART_Popup' Placement='Right' HorizontalOffset='3' IsOpen='{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}' AllowsTransparency='True' Focusable='False' PopupAnimation='Fade'>
-       <Border Background='#FFFCF9' BorderBrush='#DEC0C5' BorderThickness='1' CornerRadius='12' Padding='7' MinWidth='232'>
+       <Border Background='#FFFFFF' BorderBrush='#8996B5' BorderThickness='1' CornerRadius='0' Padding='7' MinWidth='232'>
         <ScrollViewer CanContentScroll='True' VerticalScrollBarVisibility='Auto' HorizontalScrollBarVisibility='Disabled' MaxHeight='480'><ItemsPresenter KeyboardNavigation.DirectionalNavigation='Cycle' KeyboardNavigation.TabNavigation='Cycle'/></ScrollViewer>
        </Border>
       </Popup>
@@ -47,9 +47,9 @@ namespace ElymsPet {
      <ControlTemplate.Triggers>
       <Trigger Property='HasItems' Value='True'><Setter TargetName='Arrow' Property='Visibility' Value='Visible'/></Trigger>
       <Trigger Property='IsCheckable' Value='True'><Setter TargetName='Icon' Property='Visibility' Value='Collapsed'/><Setter TargetName='CheckBox' Property='Visibility' Value='Visible'/></Trigger>
-      <Trigger Property='IsChecked' Value='True'><Setter TargetName='CheckBox' Property='Background' Value='#AD506B'/><Setter TargetName='Tick' Property='Visibility' Value='Visible'/></Trigger>
-      <Trigger Property='IsHighlighted' Value='True'><Setter TargetName='Row' Property='Background' Value='#F4DCE4'/><Setter Property='Foreground' Value='#873F59'/></Trigger>
-      <Trigger Property='IsSubmenuOpen' Value='True'><Setter TargetName='Row' Property='Background' Value='#F4DCE4'/><Setter Property='Foreground' Value='#873F59'/></Trigger>
+      <Trigger Property='IsChecked' Value='True'><Setter TargetName='CheckBox' Property='Background' Value='#5368B2'/><Setter TargetName='Tick' Property='Visibility' Value='Visible'/></Trigger>
+      <Trigger Property='IsHighlighted' Value='True'><Setter TargetName='Row' Property='Background' Value='#E5E0FF'/><Setter Property='Foreground' Value='#33497E'/></Trigger>
+      <Trigger Property='IsSubmenuOpen' Value='True'><Setter TargetName='Row' Property='Background' Value='#E5E0FF'/><Setter Property='Foreground' Value='#33497E'/></Trigger>
       <Trigger Property='IsEnabled' Value='False'><Setter TargetName='Row' Property='Opacity' Value='0.45'/></Trigger>
      </ControlTemplate.Triggers>
     </ControlTemplate>
@@ -59,14 +59,14 @@ namespace ElymsPet {
  <Style TargetType='ContextMenu'>
   <Setter Property='OverridesDefaultStyle' Value='True'/>
   <Setter Property='MinWidth' Value='270'/>
-  <Setter Property='Background' Value='#FFFCF9'/>
+  <Setter Property='Background' Value='#FFFFFF'/>
   <Setter Property='Template'>
    <Setter.Value>
     <ControlTemplate TargetType='ContextMenu'>
-     <Border Background='{TemplateBinding Background}' BorderBrush='#DEC0C5' BorderThickness='1' CornerRadius='14' Padding='7' SnapsToDevicePixels='True'>
+     <Border Background='{TemplateBinding Background}' BorderBrush='#8996B5' BorderThickness='1' CornerRadius='0' Padding='7' SnapsToDevicePixels='True'>
       <DockPanel>
-       <Border x:Name='Brand' DockPanel.Dock='Top' Background='#F8E7DE' CornerRadius='9' Padding='12,10' Margin='0,0,0,6'>
-        <StackPanel><TextBlock Text='曳尔沐  ✿' Foreground='#873F59' FontSize='14' FontWeight='SemiBold'/><TextBlock Text='把一点温柔，留在你的桌面。' Foreground='#795F69' FontSize='10.5' Margin='0,4,0,0'/></StackPanel>
+       <Border x:Name='Brand' DockPanel.Dock='Top' Background='#E7EDF9' CornerRadius='0' Padding='12,10' Margin='0,0,0,6'>
+        <StackPanel><TextBlock Text='曳尔沐  ▪ ▪ ▪' Foreground='#33497E' FontSize='14' FontWeight='SemiBold'/><TextBlock Text='把一点温柔，留在你的桌面。' Foreground='#59647E' FontSize='10.5' Margin='0,4,0,0'/></StackPanel>
        </Border>
        <ScrollViewer CanContentScroll='True' VerticalScrollBarVisibility='Auto' HorizontalScrollBarVisibility='Disabled' MaxHeight='480'><ItemsPresenter KeyboardNavigation.DirectionalNavigation='Cycle' KeyboardNavigation.TabNavigation='Cycle'/></ScrollViewer>
       </DockPanel>
@@ -102,10 +102,10 @@ namespace ElymsPet {
    var item=Item(title,glyph,null);item.Command=command;item.CommandTarget=target;item.InputGestureText=shortcut;return item;
   }
   public static void Install(Application app) {
-   app.Resources.MergedDictionaries.Add(Resources);
+   app.Resources.MergedDictionaries.Add(Resources);ModernControls.Install(app);
    app.Resources.Add(typeof(ToolTip),(Style)XamlReader.Parse(@"<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' xmlns:sys='clr-namespace:System;assembly=mscorlib' TargetType='ToolTip'>
-    <Setter Property='Foreground' Value='#59434B'/><Setter Property='FontFamily' Value='Microsoft YaHei UI'/><Setter Property='FontSize' Value='12'/><Setter Property='MaxWidth' Value='360'/>
-    <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ToolTip'><Border Background='#FFFCF9' BorderBrush='#DEC0C5' BorderThickness='1' CornerRadius='9' Padding='12,8'><ContentPresenter><ContentPresenter.Resources><DataTemplate DataType='{x:Type sys:String}'><TextBlock Text='{Binding}' TextWrapping='Wrap'/></DataTemplate></ContentPresenter.Resources></ContentPresenter></Border></ControlTemplate></Setter.Value></Setter>
+    <Setter Property='Foreground' Value='#29324B'/><Setter Property='FontFamily' Value='Microsoft YaHei UI'/><Setter Property='FontSize' Value='12'/><Setter Property='MaxWidth' Value='360'/>
+    <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ToolTip'><Border Background='#FFFFFF' BorderBrush='#8996B5' BorderThickness='1' CornerRadius='0' Padding='12,8'><ContentPresenter><ContentPresenter.Resources><DataTemplate DataType='{x:Type sys:String}'><TextBlock Text='{Binding}' TextWrapping='Wrap'/></DataTemplate></ContentPresenter.Resources></ContentPresenter></Border></ControlTemplate></Setter.Value></Setter>
    </Style>"));
    EventManager.RegisterClassHandler(typeof(TextBox),FrameworkElement.LoadedEvent,new RoutedEventHandler(delegate(object sender,RoutedEventArgs args) {
     var box=(TextBox)sender;if(box.ContextMenu==null)box.ContextMenu=EditMenu(box);
@@ -123,3 +123,5 @@ namespace ElymsPet {
   }
  }
 }
+
+

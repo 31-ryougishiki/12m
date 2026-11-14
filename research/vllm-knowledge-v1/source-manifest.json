@@ -1,0 +1,282 @@
+{
+  "CheckedOn": "2026-11-13",
+  "Commits": {
+    "vllm": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+    "vllm-ascend": "e4d533d33211f0696bcdf65eda47245d52e428c5"
+  },
+  "Files": [
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/engine/__init__.py",
+      "SHA256": "958530bb501c9482d6bde820075e22d3ef59985abb307b13b946a05bce83cc71",
+      "Lines": 403
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/engine/input_processor.py",
+      "SHA256": "2f4e9bda2042b383b8a53172766e5c750f6350e775023c7ca1f64759283a531f",
+      "Lines": 652
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/engine/core_client.py",
+      "SHA256": "9fb49f31bf41f26fd6b4c87093d62e6a1badb51282073ba4232875ee997e3cda",
+      "Lines": 2255
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/request.py",
+      "SHA256": "8f98093de8e61138a444ab3dfdb1a1cc77bced2d11363cf144a054fdae89c204",
+      "Lines": 464
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/core/sched/output.py",
+      "SHA256": "d54227d6c7aa0bb15382ec5649514b0b9d6a986d0cc0af699354c1c27551e38d",
+      "Lines": 354
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/core/kv_cache_manager.py",
+      "SHA256": "a7dc8d3967a1ba8d39af7870d724b4907271da1892a23881cb1158fd500124fa",
+      "Lines": 947
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/core/block_pool.py",
+      "SHA256": "30d66bd2ee5c79974e17e883aeaddb19fdc66137d7deddd68211b9ef782ab8f1",
+      "Lines": 936
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/worker/gpu/sample/sampler.py",
+      "SHA256": "984b334c4d996550481d9bae4d9ccd57b3c208ad3fe1579d9c9f794e0be58b40",
+      "Lines": 357
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/worker/gpu/spec_decode/rejection_sampler.py",
+      "SHA256": "11e02589b3d7c0cc7e765b90d22e624e20fa36a1abe1f6de872ec03a1b8fd49c",
+      "Lines": 480
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/engine/output_processor.py",
+      "SHA256": "33ae2849d0aa47e07bede26fae33736512fe59512ebd45653a0cb8888cc2bbff",
+      "Lines": 1050
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/engine/detokenizer.py",
+      "SHA256": "3dbc8b44ccf73e475624ab0ec4fc6ead0562635a68ce530b25c3c05558414e40",
+      "Lines": 377
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/structured_output/__init__.py",
+      "SHA256": "87ac14a71f26fe445bb7c73b46914e45b5aa9e3f7fd92c5629534fa5c5df5fc6",
+      "Lines": 548
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/attention/attention_v1.py",
+      "SHA256": "a221dd76ada427354d856990033a9ec9fd925a806f272b385e5f49edec7bcd19",
+      "Lines": 1876
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/attention/mla_v1.py",
+      "SHA256": "0aa00734f9af3b97486a3e1f798a487ea19c264ec4bb865841641b95aa1f87c9",
+      "Lines": 3490
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/worker/v2/model_runner.py",
+      "SHA256": "c372cfa9372a5439315e376da840456c2ea2556634b0b77dbf74573455ef6506",
+      "Lines": 1630
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/engine/async_llm.py",
+      "SHA256": "96bceac511270f3aa12fb07b2e5bbafbcb0e1b7b01c0b376ae0d00376c1dc48c",
+      "Lines": 1475
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/engine/core.py",
+      "SHA256": "e10864a2cac8e0acb17ddc895d9f5a3fa10b2ab62eaaec0c4cffcdafbf791419",
+      "Lines": 3156
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/platform.py",
+      "SHA256": "ad5ae640c57f60c142a05ebd3bad44a985fcc1501c9db6c76f61d3dba6c85816",
+      "Lines": 2135
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/core/sched/scheduler.py",
+      "SHA256": "2b0fa3e84fa20897efbe2d84539a05a83916a3c6b8ee525ae3a7da46cecba4c6",
+      "Lines": 3881
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/core/single_type_kv_cache_manager.py",
+      "SHA256": "eea9a7398e850afad8513fb0d0aa388e65bef9bf1fc81d42411916fe19b1835b",
+      "Lines": 2756
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/worker/gpu/model_runner.py",
+      "SHA256": "69ff6c809a8e9660483bd29e69022f5c4ebf2a239efd5174192bd89c2d5a1779",
+      "Lines": 2597
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/worker/gpu_worker.py",
+      "SHA256": "a681393f7c5782faa7a0c9842c65cbca6c1198dc4c554699555f3d724f5a68ca",
+      "Lines": 1882
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/v1/executor/abstract.py",
+      "SHA256": "a2695719bfeb7279dc9bf6de720a6727f29f8841486ba529bf36f57279943d0e",
+      "Lines": 500
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/platforms/interface.py",
+      "SHA256": "3732e6d33762ce9530f1c6c9311d8abe516a57a6cc0ab908773d3099ffa22026",
+      "Lines": 1562
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/worker/worker.py",
+      "SHA256": "269da8fef1b88fcde6e85f6b05a75dd77089c267cd3d8597f7b2e08eca213ff3",
+      "Lines": 1485
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/compilation/acl_graph.py",
+      "SHA256": "d473cad314fb6a0d9f28524fd090eee67a35fd3c78a29629ca8fcf434586dd9f",
+      "Lines": 448
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/compilation/compiler_interface.py",
+      "SHA256": "afabde3b515479dad6141c43099be94d76e2899dfa323762e939747df4e3c9ae",
+      "Lines": 413
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/core/recompute_scheduler.py",
+      "SHA256": "96209f4058cfb8bfdd132baf5b4e1c5cd1ca561427d75515efe8afb2a6795f0d",
+      "Lines": 1080
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/core/kv_cache_config_builder.py",
+      "SHA256": "b1aebcbec21c749b82de1f8b8b78798d0b08488a4faddf4ccd971247da9e8b85",
+      "Lines": 320
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/patch/__init__.py",
+      "SHA256": "16c5bbf335f6d28160d0f5c7cb1134bc42ed6a11d024cdef4489d994321d9ca5",
+      "Lines": 1767
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/_310p/attention/attention_v1.py",
+      "SHA256": "3432935bb1628e2e1ae69f5d74536dbaa02fa47003425f78a0e2ef83ed7912fa",
+      "Lines": 361
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/model_executor/models/registry.py",
+      "SHA256": "4af1db4bd96f5360be7342b79c33e9ef45ad58007daacb8ac767b70d31b76bbc",
+      "Lines": 1734
+    },
+    {
+      "Repository": "vllm",
+      "Commit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "File": "vllm/model_executor/models/deepseek_v2.py",
+      "SHA256": "b7ddd7278b716a69780cbce80f67f6c23fa68ebc346ac4da5dc01991e3edeb12",
+      "Lines": 2014
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "setup.py",
+      "SHA256": "86f73fb0ebdb439569d05fe457971ade82032bc49a3c86d277d7779729f76404",
+      "Lines": 518
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/__init__.py",
+      "SHA256": "de815dc73c489284ba6001265f3a4ca700828ffa0f9b71dca8577712b542b9bb",
+      "Lines": 120
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/ops/fused_moe/moe_comm_method.py",
+      "SHA256": "59ae754976a0c54b353ca8fcfd7a366490bb637fdcebe04e8d24c8f8f94588f3",
+      "Lines": 695
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/worker/v2/eplb.py",
+      "SHA256": "77142af403aa1b5d6a5541d60efc3d535862a4b8453ee71189946f211b34b24f",
+      "Lines": 122
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/distributed/eplb/eplb_state.py",
+      "SHA256": "9257275e8a7c6b2935683e07525974ccc7973d98e16fc7b9135e69e8fcac59c0",
+      "Lines": 766
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Commit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "File": "vllm_ascend/eplb/eplb_updator.py",
+      "SHA256": "a734e8e12a69526c185cca305bc6bed7124bc30447da4a9f1e9e4aec48c53915",
+      "Lines": 192
+    }
+  ]
+}

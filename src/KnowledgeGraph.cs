@@ -21,6 +21,7 @@ namespace ElymsPet {
   [DataMember] public string Archive="";
   [DataMember] public List<ArchiveItem> Nodes=new List<ArchiveItem>();
   [DataMember] public List<KnowledgeLink> Links=new List<KnowledgeLink>();
+  [DataMember] public List<DomainGraph> Topics=new List<DomainGraph>();
  }
  public sealed class KnowledgeGraphView {
   public List<ArchiveItem> Nodes=new List<ArchiveItem>();
@@ -107,6 +108,6 @@ namespace ElymsPet {
    }
    return text.ToString();
   }
-  public static KnowledgeGraphExport Export(ArchiveSlot slot) {Normalize(slot);return new KnowledgeGraphExport{Archive=slot.Name,Nodes=slot.Items,Links=slot.Links};}
+  public static KnowledgeGraphExport Export(ArchiveSlot slot) {Normalize(slot);return new KnowledgeGraphExport{Version=2,Archive=slot.Name,Nodes=slot.Items,Links=slot.Links,Topics=DomainKnowledge.List(slot)};}
  }
 }

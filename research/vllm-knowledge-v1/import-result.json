@@ -1,0 +1,23 @@
+{
+  "Status": "applied-and-read-back",
+  "Nodes": 59,
+  "Edges": 88,
+  "ExistingNodesPreserved": 41,
+  "PersonalReflectionsPreserved": true,
+  "ReadingGuidesPreserved": true,
+  "ModuleCoverageVerified": true,
+  "ArchiveReadBackVerified": true,
+  "Receipts": [
+    {
+      "Message": "已保存「vLLM / vLLM-Ascend 源码学习」：新增 17 个节点、更新 13 个节点、整理 0 条关系、调整 0 个模块。",
+      "RequestId": "a20d8bdc-c992-4b90-9b44-38a477ac2bb5",
+      "Status": "applied"
+    },
+    {
+      "Message": "已保存「vLLM / vLLM-Ascend 源码学习」：新增 1 个节点、更新 0 个节点、整理 26 条关系、调整 0 个模块。",
+      "RequestId": "fb6c7757-a411-4725-8fcd-fdf6ceb47020",
+      "Status": "applied"
+    }
+  ],
+  "Revision": "54a45646557405c8ffaa2aa90f6a629ffb877971a2cc595a58ff11a384b296f7"
+}

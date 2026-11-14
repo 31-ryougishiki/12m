@@ -26,7 +26,7 @@ ControlWindow → CompanionStatusViewModel
 
 每个服务、登录窗口和联网页拥有自己的 `WorkScope`，关闭时 Dispose。作用域捕获后台异常并回到 UI 线程恢复状态；排队工作和排队回调都检查当前代次，取消或关闭后丢弃旧结果。B站草稿、发布与删除使用各自的失败回调，不会错误结束另一项浏览任务。
 
-这里的取消是取消排队工作和结果交付。已经开始的同步 HTTP 请求仍由原超时结束，不承诺终止远端已接受的动作；DSH 的明确取消仍走原取消接口。若以后换成 HttpClient，再把 CancellationToken 贯穿传输层，不应只在 UI 上清除 Busy。
+取消会使排队工作和结果交付失效，并通过 `NetworkCancellation` 中止作用域内登记的 DeepSeek / Web HTTP 请求。普通聊天支持流式回复与停止，断流结果不会当作完整回答保存。B站和 DSH 的传输没有接入这套 HTTP 中止；DSH 的明确取消仍走原取消接口。取消本机等待不承诺撤销远端已接受的动作。
 
 工作线程使用捕获的字符串、对话消息或 `PetState.Snapshot()`，不读取 UI 正在修改的设置。自主活动在规划返回、执行动作之前再次检查开关、睡眠、专注和用户任务；Dispose 后的规划结果不会产生聊天、笔记或 DSH 委托。
 
@@ -40,6 +40,8 @@ ControlWindow → CompanionStatusViewModel
 - 预览使用内存仓库，不加载账号、不读取真实聊天、不启动自主计时器，也不执行后台联网任务。
 
 `Storage`、ApiKey、BiliAuth 与 DshApi 的本机入口暂保留静态兼容接口；`PetState` 仍是既有持久化 DTO。下一步若要增加多账号、多角色或替换网络供应商，可逐项为这些边界引入实例接口。没有为了这次拆分改变现有数据模型或重写全部 WPF 页面。
+
+设置入口保存 API Key 时使用当前 Windows 用户的 DPAPI，内存中的 `ApiKey` 仍供请求使用，磁盘通过 `ProtectedApiKey` 存储。读取旧明文设置时自动迁移，同时加密旧备份；迁移到另一台电脑或 Windows 账号后需重新填写密钥。独立的 `api-key.txt` 和环境变量继续按既有优先级支持，由用户管理。
 
 ## DSH 桥接
 

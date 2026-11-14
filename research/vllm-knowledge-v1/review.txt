@@ -1,0 +1,35 @@
+vLLM / vLLM-Ascend 初始知识图谱复核与增补（2026-11-13）
+既有 41 个节点逐项静态复核；修正或补证 13 个；新增 18 个；完成后 59 个。
+沿用已有模块、旅程和个人复述；无部署或推理实测。
+建议阅读：请求对象 → 输入处理 → 客户端 → EngineCore.step → SchedulerOutput → KV 查询/分配/回收 → Runner/采样 → 输出处理/停止。
+Ascend 支线：插件 → NPUPlatform → Worker/Runner → 注意力后端/元数据/前向 → MLA → 图执行 → MoE/EPLB。
+
+复核改动：
+- entry-async-llm: 删除“Ascend 不改这一层/改动都在 EngineCore 内部”的无证据全称判断。
+- engine-core-step: 明确 step 是非 batch_queue 路径；调度器替换取决于配置。
+- scheduler-schedule: 统一 token 进度不等于代码完全不区分 prefill/decode；缓存登记位置不作排他判断。
+- model-runner-execute: 前向与采样不是同一个函数内的无条件连续调用。
+- worker-gpu: NPUWorker 与 GPU Worker 同属 WorkerBase，不能把 NPU 选择描述成覆写 GPU _make_model_runner。
+- executor-boundary: 缩小“差别全在 Executor”与单一排错入口的过度概括。
+- model-registry-table: 实质错误：_ModelInfo 保存能力信息；module_name/class_name 属于 _LazyRegisteredModel。模型支持也不只依赖注册表。
+- model-registry: 区分注册表方法与模块级懒加载函数，补充实际导入/能力检查证据。
+- legacy-310p: 兼容表未实现 MLA/SFA 专项不等于整仓库或硬件全面不支持；名称不作为弃用判断。
+- compile-backend: compute_hash 是编译器贡献的因素，不足以证明整个缓存键只由 Ascend 决定。
+- eplb: HIXL 会话存在不证明所有配置都使用 HIXL；旧目录存在不证明当前路径或弃用状态。
+- engine-core-kv-init: 显存测量和预热都有条件分支，不写成每次启动必经。
+- engine-core-request-struct: 补齐实际 msgspec.Struct 定义、字段与传输边界，替换仅使用点证据。
+
+资料入口（背景材料；以固定源码为本版实现证据）：
+https://docs.vllm.ai/en/latest/design/arch_overview/
+https://docs.vllm.ai/en/latest/design/plugin_system/
+https://docs.vllm.ai/projects/ascend/en/main/developer_guide/Design_Documents/index.html
+https://arxiv.org/abs/2309.06180
+
+后续：补充量化、LoRA、PD 传输与上下文并行的具体运行路径；读取算子规格与测试用例，再做匹配版本的设备验证。
+
+生成命令仅产生增量；graph-edit-result.json 同 RequestId 返回 applied 才表示存档已保存。
+
+实际导入结果：两批均收到 applied 回执；已回读 archives.json 验证 59 节点、88 条关系、全量唯一模块归属，41 个原节点的未编辑字段、复述与 ReadingGuide 保留。
+reference-graph.json 是去除个人复述和 ReadingGuide 的完整参考图谱；graph-delta.json 是本轮增量，旧 Revision 仅用于追溯，不能直接重复提交。
+verification.json 记录全部 59 节点固定源码行与片段校验；自动检查不替代人工语义与设备验证。
+源码归属：vllm-project/vllm 与 vllm-project/vllm-ascend，代码片段遵循原仓 Apache-2.0 许可证，保留各节点固定来源链接。

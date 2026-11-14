@@ -10,22 +10,25 @@ using System.Windows.Threading;
 namespace ElymsPet {
  /// <summary>界面配色与字体，陪伴面板、浮动输入框和桌宠共用。</summary>
  public static class Theme {
-  // Cream stationery, cherry blossom accents, and cocoa text.
+  // Pixel terminal: paper-white surfaces, ink outlines and cyan/lilac accents.
   public static readonly SolidColorBrush Canvas=Brush("#FFF7F0");
   public static readonly SolidColorBrush Surface=Brush("#FFFCF9");
   public static readonly SolidColorBrush Sidebar=Brush("#F8E7DE");
   public static readonly SolidColorBrush Accent=Brush("#AD506B");
-  public static readonly FontFamily Font=new FontFamily("Microsoft YaHei UI");
+  public static readonly FontFamily ReadingFont=new FontFamily("Microsoft YaHei UI");
+  public static readonly FontFamily Font=PixelFont();
+  static FontFamily PixelFont(){try{string dir=System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"fonts");if(System.IO.Directory.Exists(dir))foreach(var family in Fonts.GetFontFamilies(new Uri(dir+System.IO.Path.DirectorySeparatorChar)))return family;}catch{}return new FontFamily("Consolas, Microsoft YaHei UI");}
   public static readonly SolidColorBrush TextMain=Brush("#4F3B43");
   public static readonly SolidColorBrush TextSoft=Brush("#78616A");
   public static readonly SolidColorBrush TextDim=Brush("#795F69");
   public static readonly SolidColorBrush Success=Brush("#447969");
   public static readonly SolidColorBrush Lav=Brush("#78669B");
-  public static readonly SolidColorBrush HerBubble=Brush("#F2EAF7");
-  public static readonly SolidColorBrush HerBorder=Brush("#DCCCE6");
-  public static readonly SolidColorBrush UserBubble=Brush("#F5E1D5");
-  public static readonly SolidColorBrush UserBorder=Brush("#E6C6B5");
-  public static readonly SolidColorBrush UserText=Brush("#59434B");
+  public static readonly SolidColorBrush HerBubble=Brush("#F1E8FF");
+  public static readonly SolidColorBrush HerBorder=Brush("#B99AE5");
+  public static readonly SolidColorBrush HerText=Brush("#493064");
+  public static readonly SolidColorBrush UserBubble=Brush("#DBEAFE");
+  public static readonly SolidColorBrush UserBorder=Brush("#60A5FA");
+  public static readonly SolidColorBrush UserText=Brush("#173E73");
   public static readonly SolidColorBrush Line=Brush("#E9D6CF");
   static Style scrollBarStyle;
   /// <summary>柔和的玫瑰色滚动条，面板和对话气泡共用。</summary>
@@ -47,7 +50,7 @@ namespace ElymsPet {
  <Grid Background='Transparent'>
   <Track x:Name='PART_Track' IsDirectionReversed='True' Minimum='{TemplateBinding Minimum}' Maximum='{TemplateBinding Maximum}' Value='{TemplateBinding Value}' ViewportSize='{TemplateBinding ViewportSize}'>
    <Track.DecreaseRepeatButton><RepeatButton Command='{x:Static ScrollBar.PageUpCommand}' Opacity='0' Focusable='False'/></Track.DecreaseRepeatButton>
-   <Track.Thumb><Thumb><Thumb.Template><ControlTemplate TargetType='{x:Type Thumb}'><Border Background='#C9A9AB' CornerRadius='3' Margin='1,0'/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+   <Track.Thumb><Thumb><Thumb.Template><ControlTemplate TargetType='{x:Type Thumb}'><Border Background='#8394BB' CornerRadius='0' Margin='1,0'/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
    <Track.IncreaseRepeatButton><RepeatButton Command='{x:Static ScrollBar.PageDownCommand}' Opacity='0' Focusable='False'/></Track.IncreaseRepeatButton>
   </Track>
  </Grid>
@@ -55,6 +58,18 @@ namespace ElymsPet {
    return (ControlTemplate)XamlReader.Parse(xaml);
   }
   public static SolidColorBrush Brush(string hex) {
+   switch(hex.ToUpperInvariant()){
+    case "#FFF7F0":hex="#F2F4FA";break;
+    case "#FFFCF9":hex="#FFFFFF";break;
+    case "#F8E7DE":case "#F6EAE3":hex="#E7EDF9";break;
+    case "#AD506B":case "#873F59":hex="#5368B2";break;
+    case "#4F3B43":case "#59434B":case "#624B53":hex="#29324B";break;
+    case "#78616A":case "#795F69":hex="#59647E";break;
+    case "#E9D6CF":case "#DEC3BA":case "#D6B7AE":hex="#8996B5";break;
+    case "#F5E1D5":hex="#DFF7F2";break;
+    case "#E6C6B5":hex="#71B6AD";break;
+    case "#F2EAF7":hex="#EDE8FF";break;
+   }
    var brush=new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
    brush.Freeze();return brush;
   }
@@ -75,40 +90,39 @@ namespace ElymsPet {
  /// <summary>WPF 控件工厂：窗口代码只描述布局，不重复样板。</summary>
  public static class Ui {
   public static SolidColorBrush Brush(string hex) {
-   var brush=(SolidColorBrush)new BrushConverter().ConvertFromString(hex);
-   brush.Freeze();return brush;
+   return Theme.Brush(hex);
   }
   public static TextBlock Text(string text,double size,string color) {
-   return new TextBlock{Text=text,FontSize=size,Foreground=Brush(color),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10)};
+   return new TextBlock{Text=text,FontFamily=size>=18?Theme.Font:Theme.ReadingFont,FontSize=Math.Max(12,size),Foreground=Brush(color),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10)};
   }
   public static Border Card(UIElement child) {
-   return new Border{Background=Theme.Surface,BorderBrush=Theme.Line,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(18),Padding=new Thickness(20),Margin=new Thickness(0,0,0,14),Child=child};
+   return new Border{Background=Theme.Surface,BorderBrush=Theme.Line,BorderThickness=new Thickness(2),CornerRadius=new CornerRadius(0),Padding=new Thickness(20),Margin=new Thickness(0,0,4,18),Child=child,Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=0,ShadowDepth=4,Direction=315,Opacity=.22,Color=(Color)ColorConverter.ConvertFromString("#617196")}};
   }
   static ControlTemplate buttonTemplate,inputTemplate,checkTemplate;
   public static TextBox Input(string text,int height) {
-   var field=new TextBox{Text=text,Height=height,Background=Brush("#FFFCF9"),Foreground=Theme.TextMain,CaretBrush=Theme.Accent,BorderBrush=Brush("#D6B7AE"),BorderThickness=new Thickness(1),Padding=new Thickness(12,9,12,9),FontSize=13,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12),VerticalContentAlignment=VerticalAlignment.Center};
+   var field=new TextBox{Text=text,FontFamily=Theme.ReadingFont,Height=height,Background=Brush("#FFFCF9"),Foreground=Theme.TextMain,CaretBrush=Theme.Accent,BorderBrush=Brush("#DAE1ED"),BorderThickness=new Thickness(1),Padding=new Thickness(12,9,12,9),FontSize=13,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12),VerticalContentAlignment=VerticalAlignment.Center};
    if(inputTemplate==null)inputTemplate=(ControlTemplate)XamlReader.Parse(@"<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='TextBox'>
-    <Border x:Name='Frame' Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='{TemplateBinding BorderThickness}' CornerRadius='8'>
+    <Border x:Name='Frame' Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='{TemplateBinding BorderThickness}' CornerRadius='6'>
      <ScrollViewer x:Name='PART_ContentHost'/>
     </Border>
     <ControlTemplate.Triggers>
-     <Trigger Property='IsKeyboardFocusWithin' Value='True'><Setter TargetName='Frame' Property='BorderBrush' Value='#AD506B'/></Trigger>
+     <Trigger Property='IsKeyboardFocusWithin' Value='True'><Setter TargetName='Frame' Property='BorderBrush' Value='#5368B2'/></Trigger>
      <Trigger Property='IsEnabled' Value='False'><Setter TargetName='Frame' Property='Opacity' Value='0.45'/></Trigger>
     </ControlTemplate.Triggers>
    </ControlTemplate>");
-   field.Template=inputTemplate;return field;
+   field.Template=inputTemplate;ClipboardEditing.Attach(field);return field;
   }
   public static Button Button(string label,Action action,bool primary) {
-   var button=new Button{Content=label,Padding=new Thickness(15,10,15,10),Margin=new Thickness(0,0,9,9),Background=Brush(primary?"#AD506B":"#F6EAE3"),Foreground=Brush(primary?"#FFFFFF":"#624B53"),BorderBrush=Brush(primary?"#AD506B":"#DEC3BA"),BorderThickness=new Thickness(1),Cursor=System.Windows.Input.Cursors.Hand,FontSize=13,HorizontalContentAlignment=HorizontalAlignment.Center,VerticalContentAlignment=VerticalAlignment.Center};
+   var button=new Button{Content=label,FontFamily=Theme.ReadingFont,Padding=new Thickness(15,10,15,10),Margin=new Thickness(0,0,9,9),Background=Brush(primary?"#AD506B":"#F6EAE3"),Foreground=Brush(primary?"#FFFFFF":"#624B53"),BorderBrush=Brush(primary?"#AD506B":"#DEC3BA"),BorderThickness=new Thickness(2),Cursor=System.Windows.Input.Cursors.Hand,FontSize=16,HorizontalContentAlignment=HorizontalAlignment.Center,VerticalContentAlignment=VerticalAlignment.Center};
    if(buttonTemplate==null)buttonTemplate=(ControlTemplate)XamlReader.Parse(@"<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='Button'>
-    <Border x:Name='Frame' Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='{TemplateBinding BorderThickness}' CornerRadius='9'>
-     <Grid><Border x:Name='Wash' Background='#873F59' Opacity='0' CornerRadius='8'/>
+    <Border x:Name='Frame' Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='{TemplateBinding BorderThickness}' CornerRadius='0'>
+     <Grid><Border x:Name='Wash' Background='#27AFA1' Opacity='0' CornerRadius='0'/>
       <ContentPresenter Margin='{TemplateBinding Padding}' HorizontalAlignment='{TemplateBinding HorizontalContentAlignment}' VerticalAlignment='{TemplateBinding VerticalContentAlignment}' RecognizesAccessKey='True'/>
      </Grid>
     </Border>
     <ControlTemplate.Triggers>
      <Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Wash' Property='Opacity' Value='0.08'/></Trigger>
-     <Trigger Property='IsKeyboardFocused' Value='True'><Setter TargetName='Frame' Property='BorderBrush' Value='#873F59'/><Setter TargetName='Wash' Property='Opacity' Value='0.12'/></Trigger>
+     <Trigger Property='IsKeyboardFocused' Value='True'><Setter TargetName='Frame' Property='BorderBrush' Value='#27AFA1'/><Setter TargetName='Wash' Property='Opacity' Value='0.12'/></Trigger>
      <Trigger Property='IsPressed' Value='True'><Setter TargetName='Frame' Property='Opacity' Value='0.72'/></Trigger>
      <Trigger Property='IsEnabled' Value='False'><Setter TargetName='Frame' Property='Opacity' Value='0.5'/></Trigger>
     </ControlTemplate.Triggers>
@@ -120,15 +134,15 @@ namespace ElymsPet {
    if(checkTemplate==null)checkTemplate=(ControlTemplate)XamlReader.Parse(@"<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='CheckBox'>
     <Grid x:Name='Root' Background='Transparent'>
      <Grid.ColumnDefinitions><ColumnDefinition Width='Auto'/><ColumnDefinition Width='*'/></Grid.ColumnDefinitions>
-     <Border x:Name='Box' Width='17' Height='17' Margin='0,2,0,0' VerticalAlignment='Top' CornerRadius='5' Background='#FFFCF9' BorderBrush='#AD7D8C' BorderThickness='1'>
+     <Border x:Name='Box' Width='17' Height='17' Margin='0,2,0,0' VerticalAlignment='Top' CornerRadius='0' Background='#FFFFFF' BorderBrush='#8996B5' BorderThickness='1'>
       <Path x:Name='Tick' Data='M 3,7 L 6,10 L 12,4' Stroke='White' StrokeThickness='1.8' Visibility='Collapsed'/>
      </Border>
      <ContentPresenter Grid.Column='1' Margin='{TemplateBinding Padding}' RecognizesAccessKey='True'/>
     </Grid>
     <ControlTemplate.Triggers>
-     <Trigger Property='IsChecked' Value='True'><Setter TargetName='Box' Property='Background' Value='#AD506B'/><Setter TargetName='Tick' Property='Visibility' Value='Visible'/></Trigger>
-     <Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Box' Property='BorderBrush' Value='#873F59'/></Trigger>
-     <Trigger Property='IsKeyboardFocused' Value='True'><Setter TargetName='Box' Property='BorderThickness' Value='2'/><Setter TargetName='Box' Property='BorderBrush' Value='#873F59'/></Trigger>
+     <Trigger Property='IsChecked' Value='True'><Setter TargetName='Box' Property='Background' Value='#5368B2'/><Setter TargetName='Tick' Property='Visibility' Value='Visible'/></Trigger>
+     <Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Box' Property='BorderBrush' Value='#27AFA1'/></Trigger>
+     <Trigger Property='IsKeyboardFocused' Value='True'><Setter TargetName='Box' Property='BorderThickness' Value='2'/><Setter TargetName='Box' Property='BorderBrush' Value='#27AFA1'/></Trigger>
      <Trigger Property='IsEnabled' Value='False'><Setter TargetName='Root' Property='Opacity' Value='0.5'/></Trigger>
     </ControlTemplate.Triggers>
    </ControlTemplate>");
@@ -158,3 +172,5 @@ namespace ElymsPet {
   }
  }
 }
+
+

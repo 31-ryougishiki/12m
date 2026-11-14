@@ -1,0 +1,633 @@
+{
+  "TopicId": "vllm-ascend-source",
+  "ExpectedRevision": "359d8a74fa1fc70891c1063188e08c8a7b27b7d1c90ac115b1194a68ce0f9103",
+  "Nodes": [
+    {
+      "Id": "entry-async-llm",
+      "Summary": "AsyncLLM 是异步生成入口：把输入转换为 EngineCoreRequest，登记每个请求的结果队列，再通过 EngineCoreClient 提交。这里展示多进程客户端路径；Ascend 插件还会应用进程级补丁，不能据此断言它绝不影响前端。",
+      "Approach": "读 vllm/v1/engine/async_llm.py：`AsyncLLM.add_request`（L411）先用 `InputProcessor.process_inputs`（L497，同步分支）或 `process_inputs_async`（L514，需 tokenize/多模态时）把原始 prompt 变成 EngineCoreRequest；L565 `check_admission(parent_params.n, parent_request.request_id)` 做准入（max_num_queued_reqs / max_num_queued_tokens），n>1 时 L573 逐个 `await self.engine_core.add_request_async(child_request)` 拆子请求；真正下发在 `_add_request`（L581）末尾 L598 的 `await self.engine_core.add_request_async(request)`，注释写明 “to EngineCore (separate process)”。边界：这是本提交的 AsyncLLM 提交流程，不是对 Ascend 全部补丁影响范围的证明；EngineCoreClient 另有 InprocClient，不能把所有入口都说成跨进程。",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "engine-core-step",
+      "Approach": "读 vllm/v1/engine/core.py `EngineCore.step`（L718）：L728 `scheduler_output = self.scheduler.schedule(self._should_throttle_prefills())`；L731 `future = self.model_executor.execute_model(scheduler_output, non_block=True)` 是异步下发（返回 Future），L737 `model_output = self._wait_for_output(future)`，若为 None 则 L739 `sample_tokens(grammar_output)`；最后 L744 `engine_core_outputs = self.scheduler.update_from_output(scheduler_output, model_output)`。注意注入点：L163 `self.model_executor = executor_class(vllm_config)`（executor 类由前端 `Executor.get_class` 决定）、L180 `Scheduler = vllm_config.scheduler_config.get_scheduler_cls()`（选择配置指定的调度器；Ascend 仅在对应功能启用时改写该配置）、L193 实例化；L253 `step_fn = self.step if self.batch_queue is None else self.step_with_batch_queue`。\n适用范围：本文解释 step；batch_queue 非空时选择 step_with_batch_queue，不能把本节点当作所有异步执行的完整时间线。",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "scheduler-schedule",
+      "Summary": "调度器按请求的已计算 token 与目标 token 进度分配本轮预算，并申请 KV 缓存槽位。预填充是处理提示词，解码是继续生成；统一调度抽象并不消除节流、统计和设备执行中的阶段差异。",
+      "Approach": "读 vllm/v1/core/sched/scheduler.py：`class Scheduler(SchedulerInterface)`（L86），`__init__` 里 L350 `self.kv_cache_manager = KVCacheManager(...)` 建请求级 KV 管理器（块级语义在 SingleTypeKVCacheManager，由它下面的 coordinator 持有）；`schedule`（L685）L686 `self.current_step += 1`，L687-696 注释明确「调度器里没有 prefill/decode 阶段」；L736 `self.kv_cache_manager.new_step_starts()`，L882 `new_blocks = self.kv_cache_manager.allocate_slots(request, num_new_tokens, num_lookahead_tokens=...)` 申请槽位，L944 在分配不到时抢占，L1803 `take_new_block_ids()` 汇总本步新块。输出确认后的前缀缓存登记可在同类 `update_from_output`（L2245）的 L2412 找到；此处不声称所有登记路径都只发生在这里。",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "model-runner-execute",
+      "Summary": "GPUModelRunner 把 SchedulerOutput 整理成输入批次、缓存块表和注意力元数据，并执行模型。最后一个流水线阶段可保存 execute_model_state，供单独的 sample_tokens 使用；Ascend 的 V2 Runner 继承并覆盖部分行为。",
+      "Approach": "读 vllm/v1/worker/gpu/model_runner.py：类在 L203；`initialize_kv_cache`（L643）内 L731 用 `init_attn_backend(self.kv_cache_config, self.vllm_config, self.device, ...)` 向当前平台要注意力后端与 metadata builder，L805 建 `self.cudagraph_manager = ModelCudaGraphManager(...)`；`execute_model`（L1826）在真实 batch 上 L1894 `batch_desc, dp_sync_state = dispatch_cg_and_sync_dp(...)` 选 FULL/PIECEWISE/NONE，L1924 `input_batch = self.prepare_inputs(...)`，L1927 `block_tables, slot_mappings = self.prepare_attn(input_batch)`，L2166 `model_output = self.model(**model_inputs)`；`sample_tokens` 在 L2222。文件头强调这是所有模型共享的稳定层，模型特性应写在模型里；Ascend 的差异集中在 model_state、attn backend 与图后端。\n边界：这里的 execute_model 与 sample_tokens 是两个接口，不是前者必然直接调用后者；EngineCore.step 在执行结果为 None 时另行调用采样。Ascend 也改写 execute_model、采样、KV connector 等流程，差异不局限于三个组件。",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "worker-gpu",
+      "Approach": "读 vllm/v1/worker/gpu_worker.py：`class Worker(WorkerBase)`（L216）；`init_device`（L453）先做设备/rank 映射与 dtype 校验，然后 L504-514 `init_worker_distributed_environment(...)`（注释说明必须在显存快照前建 NCCL 缓冲），L540-557 才 `MemorySnapshot` + `request_memory` 定预算，L565 `self._init_workspace_and_model_runner()`；注意 L579 的 runner 类型注解 `self.model_runner: GPUModelRunner = self._make_model_runner()`，而 `_make_model_runner`（L584）在 L590-592 `from ...gpu.model_runner import GPUModelRunner` 后 `return GPUModelRunner(self.vllm_config, self.device)`。Ascend 的 NPUWorker 另行继承 WorkerBase，在自己的 init_device 中直接创建 NPUModelRunner；它不是覆盖本类 _make_model_runner 的子类。`load_model`（L600）L608 `self.model_runner.load_model(load_dummy_weights=load_dummy_weights)`；`determine_available_memory`（L686）供 EngineCore 算 KV 容量；`initialize_from_config`（L900）；`compile_or_warm_up_model`（L1026）；`execute_model`（L1457）处理 PP 收/发后 L1485 `output = self.model_runner.execute_model(scheduler_output, intermediate_tensors)`。",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "executor-boundary",
+      "Summary": "EngineCore 接收并持有 Executor 实例，通过执行器接口派发模型执行、采样和缓存初始化。Executor 选择影响进程与 RPC 组织方式；平台、Worker 和启动参数也参与运行拓扑。",
+      "Approach": "读 vllm/v1/executor/abstract.py：`class Executor(ABC)`（L53）；静态工厂 `get_class`（L64）按 `parallel_config.distributed_executor_backend` 返回实现：L76-79 \"ray\"→RayExecutorV2、L80-83 \"mp\"→MultiprocExecutor、L84-87 \"uni\"→UniProcExecutor、L88-91 \"external_launcher\"、L92-97 自定义限定名。EngineCore L163 拿到的是 `executor_class`，不是 worker；所有平台动作经 `execute_model`（L291）→ L294 `self.collective_rpc(\"execute_model\", args=(scheduler_output,), non_block=non_block)` 下发，另有 `sample_tokens`（L311）、`determine_available_memory`（L182）、`get_kv_cache_specs`（L202）、`initialize_from_config`（L129）、`compile_or_warm_up_model`（L133）。排查启动方式时先检查 distributed_executor_backend，再检查平台配置、Worker 与 EngineCore 启动路径。注意关系方向：是 EngineCore 构造并持有 Executor，Executor 反过来驱动 Worker；Executor 不「实现 EngineCore 的接口」。",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "model-registry-table",
+      "Summary": "注册表把架构名称映射到模型实现；懒注册对象保存模块路径和类名，能力检查结果保存在 _ModelInfo。注册成功只代表能够解析入口，不保证硬件、权重格式和算子支持。",
+      "Approach": "输入是模型架构名称或插件注册项，输出是已注册的模型描述。_LazyRegisteredModel L1054-L1058 保存 module_name/class_name；load_model_cls L1188-L1190 使用 importlib 导入并取出类。inspect_model_cls L1155-L1186 优先读取基于模块 hash 的能力缓存，未命中才在子进程加载并检查模型。_ModelInfo L946 起保存 architecture、supports_lora、supports_pp、supports_multimodal 等能力字段，不保存模块路径。register_model 同时支持类对象和 module:class 字符串。",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L73\nhttps://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L92-L99\nhttps://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L859\nhttps://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L1054\nhttps://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L1221\nhttps://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L1655\nhttps://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L946-L974\nhttps://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L1155-L1190",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "model-registry",
+      "Approach": "resolve_model_cls L1494-L1533 根据 model_impl 和 architectures 选择原生或 transformers/terratorch 路径，返回模型类及架构名。注册表的 _try_load_model_cls 方法委托模块级缓存函数；模块级函数 L1194-L1205 先调用 current_platform.verify_model_arch，再调用 model.load_model_cls。懒对象的 load_model_cls L1188-L1190 才真正 import 模块；inspect_model_cls L1155-L1186 可读取能力缓存，未命中时在子进程检查，以减少主进程过早初始化 CUDA 的风险。解析到类不等于权重已装载或推理可运行。",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L1494-L1533\nhttps://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L1328\nhttps://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L1441\nhttps://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L92-L94\nhttps://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/model_executor/models/registry.py#L1155-L1205",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "legacy-310p",
+      "Summary": "310P 的兼容后端在当前选择表中只有普通注意力项，并有特定 KV 布局。此处没有独立 MLA/SFA 表项；该局部事实不能推出整个硬件或其他路径完全不支持，也不表示 310P 已弃用。",
+      "Approach": "读 platform.py `_select_attn_backend_cls`：L340-348 `compatibility_backend_map` 只有 `(False, False) -> vllm_ascend._310p.attention.attention_v1.AscendAttentionBackend310`，L345-347 是被注释掉的 MLA/SFA 310 变体并写「If MLA/SFA is supported in the future」；L350-351 `if ... attention_backend_family is AttentionBackendFamily.COMPATIBILITY:` 时返回该表结果（缺省回落到 (False, False)）。读 _310p/attention/attention_v1.py：L47 `@register_backend(AttentionBackendEnum.CUSTOM, \"ASCEND\")`、L48 `class AscendAttentionBackend310(AscendAttentionBackend)`；L56 `get_kv_cache_shape` 的 docstring 说明 310P 需要特定对齐，L81 `return (2, num_blocks, (num_kv_heads * head_size) // 16, block_size, 16)`——即把 head_size 维拆成 16 对齐的 5D 形状；L110 `class AscendAttentionBackendImpl310(AscendAttentionBackendImpl)`。另有 `register_triton_kernel_overrides`（platform.py L140-144）在兼容族下注册采样 kernel override（走 `_310p/worker/v2/sample/dispatch`）。读主线可跳过这一族，排查 310P 机型问题必须回到这里。\n范围：这是兼容后端选择表与缓存布局的静态观察，未验证任何具体模型在 310P 的支持矩阵。",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "compile-backend",
+      "Summary": "AscendCompiler 接收 FX 图与示例输入，按 enable_npugraph_ex 选择 npugraph_ex_compile 或 fusion_pass_compile，并提供包含 torch_npu 版本等因素的编译器 hash。这个 hash 不等同于上游完整缓存键。",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "eplb",
+      "Summary": "EPLB（专家并行负载均衡）根据专家负载调整放置和路由。V2 使用 AscendEPLBController 与 AscendEplbState，另有 eplb/ 下的子进程与 D2D 实现；具体通信器和迁移路径取决于配置，不能把两套实现混为一谈。",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "engine-core-kv-init",
+      "Summary": "EngineCore 在构造调度器前收集 Worker 的 KVCacheSpec，并结合可用缓存内存生成各 Worker 与调度器的 KVCacheConfig，再通过 Executor 初始化缓存。是否重新测量内存和执行预热取决于启动分支；无 KV 缓存模型另行处理。",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证"
+    },
+    {
+      "Id": "engine-core-request-struct",
+      "Title": "EngineCoreRequest：前端与引擎的数据契约",
+      "Tier": "CORE",
+      "Summary": "EngineCoreRequest 是 msgspec.Struct 请求对象，携带请求 ID、输入 token/嵌入、多模态特征及采样或池化参数。它负责传递请求数据，不负责调度或执行模型。",
+      "Approach": "类声明使用 array_like=True、omit_defaults=True、gc=False。prompt_token_ids 在类型检查时标作 list，运行时声明为 ndarray；注释区分进程间帧视图和进程内列表。client_index 用于把输出送回原客户端，external_req_id 保存外部请求标识；params 属性优先返回 sampling_params，否则要求 pooling_params 存在。输入转换由 InputProcessor 完成，消息编码由客户端负责；本类不是 dataclass。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/engine/__init__.py L164-L203\nclass EngineCoreRequest(\n    msgspec.Struct,\n    array_like=True,  # type: ignore[call-arg]\n    omit_defaults=True,  # type: ignore[call-arg]\n    gc=False,\n):  # type: ignore[call-arg]\n    request_id: str\n    if TYPE_CHECKING:\n        prompt_token_ids: list[int] | None\n    else:\n        # Both frontends send a 32-bit int ndarray, out of band when long, which\n        # decodes as a view of the received frame; Request copies it into a\n        # TokenBuffer. In-process clients pass the list.\n        prompt_token_ids: np.ndarray | None\n    mm_features: list[MultiModalFeatureSpec] | None\n    sampling_params: SamplingParams | None\n    pooling_params: PoolingParams | None\n    arrival_time: float\n    lora_request: LoRARequest | None\n    cache_salt: str | None\n    data_parallel_rank: int | None\n    prompt_embeds: torch.Tensor | None = None\n\n    # Per-position mask for mixed-mode inputs (e.g chat completion with\n    # prompt_embeds content parts). `True` means the position is a real\n    # token ID; `False` means the position uses a pre-computed entry from\n    # `prompt_embeds`. `None` for pure-tokens and pure-embeds requests.\n    prompt_is_token_ids: list[bool] | None = None\n\n    # Index of the client, used to ensure outputs are sent back to the same\n    # client for this request when scaling out the front-end.\n    client_index: int = 0\n\n    # Used in DP case to indicate which wave of requests this is expected to\n    # belong to, to cover a race condition where the request is sent before\n    # a wave finished notification is received.\n    current_wave: int = 0\n    priority: int = 0\n\n    trace_headers: Mapping[str, str] | None = None",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/__init__.py#L164-L234",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/__init__.py#L164-L234",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "request_id、external_req_id、client_index 各解决什么问题？为什么不能把请求对象当成运行中请求的全部状态？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "input-process",
+      "Title": "InputProcessor：校验并组装请求",
+      "Tier": "CORE",
+      "Summary": "输入处理器接收 EngineInput 或旧式原始提示词及参数，检查任务、LoRA、设备和输入限制，返回 EngineCoreRequest。它属于前端预处理，不执行模型前向。",
+      "Approach": "已带 type 的 EngineInput 直接进入校验；旧式原始 prompt 经 renderer.render_cmpl 转换，源码将直接传原始 prompt 标为 deprecated。随后执行 current_platform.validate_request 和模型输入检查，按位置组织多模态特征，最终创建 EngineCoreRequest。token 是分词器产生的整数编号；多模态特征不是可以随意拼接的普通文本 token。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/engine/input_processor.py L361-L400\n    def process_inputs(\n        self,\n        request_id: str,\n        prompt: PromptType | EngineInput,\n        params: SamplingParams | PoolingParams,\n        supported_tasks: tuple[SupportedTask, ...],\n        arrival_time: float | None = None,\n        lora_request: LoRARequest | None = None,\n        tokenization_kwargs: dict[str, Any] | None = None,\n        trace_headers: Mapping[str, str] | None = None,\n        priority: int = 0,\n        data_parallel_rank: int | None = None,\n        resumable: bool = False,\n        session_id: str | None = None,\n        kv_hints: KvHintsEnvelope | None = None,\n    ) -> EngineCoreRequest:\n        watermarking = self._validate_params(params, supported_tasks)\n        self._validate_lora(lora_request)\n\n        parallel_config = self.vllm_config.parallel_config\n        dp_size = parallel_config.data_parallel_size\n        dp_local_size = parallel_config.data_parallel_size_local\n        num_ranks = dp_local_size if parallel_config.local_engines_only else dp_size\n        if data_parallel_rank is not None and not (0 <= data_parallel_rank < num_ranks):\n            raise VLLMValidationError(\n                f\"data_parallel_rank {data_parallel_rank} \"\n                f\"is out of range [0, {num_ranks}).\"\n            )\n\n        if isinstance(prompt, dict) and \"type\" in prompt:\n            if arrival_time is None:\n                arrival_time = prompt.get(\"arrival_time\", time.time())  # type: ignore[assignment]\n\n            engine_input: EngineInput = prompt  # type: ignore[assignment]\n        else:\n            logger.warning_once(\n                \"Passing raw prompts to InputProcessor is deprecated \"\n                \"and will be removed in the future. You should instead pass \"\n                \"the outputs of Renderer.render_cmpl() or Renderer.render_chat().\"\n            )",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/input_processor.py#L361-L550",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/input_processor.py#L361-L550",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "为什么已经渲染的 EngineInput 与原始字符串走不同路径？非法 data_parallel_rank 在哪个阶段被拒绝？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "client-ipc",
+      "Title": "AsyncMPClient：编码并提交跨进程消息",
+      "Tier": "CORE",
+      "Summary": "多进程异步客户端把请求类型和编码后的请求组成消息，再交给消息发送方法。IPC 指进程间通信；这是前端提交数据的边界，不是直接执行 EngineCore.step。",
+      "Approach": "_send_input 接收 EngineCoreRequestType、请求和可选 engine 标识；未指定 engine 时使用 core_engine。encoder.encode 的结果与 request_type.value 组成消息，由 _send_input_message 发送并返回可等待对象。另有 InprocClient，因此本节点结论只覆盖 AsyncMPClient。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/engine/core_client.py L1316-L1326\n    def _send_input(\n        self,\n        request_type: EngineCoreRequestType,\n        request: Any,\n        engine: EngineIdentity | None = None,\n    ) -> Awaitable[Any]:\n        if engine is None:\n            engine = self.core_engine\n\n        message = (request_type.value, *self.encoder.encode(request))\n        return self._send_input_message(message, engine)",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/core_client.py#L1316-L1326",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/core_client.py#L1316-L1326",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "这里的 Awaitable 能否证明推理已经完成？发送请求和等待模型结果分别发生在哪里？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "request-runtime",
+      "Title": "Request：引擎内的请求状态入口",
+      "Tier": "A",
+      "Summary": "引擎把传输对象 EngineCoreRequest 转成 Request，后者承载请求在调度中的状态。转换时把请求字段与块 hash 计算器交给构造函数。",
+      "Approach": "from_engine_core_request 是类方法，显式转交 client_index、prompt、参数、多模态、优先级和会话等字段，并接收 block_hasher 与可选 block_hashes。传输对象和内部状态对象有不同职责，不能把本转换当成模型执行或 token 生成。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/request.py L257-L285\n    def from_engine_core_request(\n        cls,\n        request: EngineCoreRequest,\n        block_hasher: Callable[[\"Request\"], list[\"BlockHash\"]] | None,\n        block_hashes: list[\"BlockHash\"] | None = None,\n    ) -> \"Request\":\n        return cls(\n            request_id=request.request_id,\n            client_index=request.client_index,\n            prompt_token_ids=request.prompt_token_ids,\n            prompt_embeds=request.prompt_embeds,\n            prompt_is_token_ids=request.prompt_is_token_ids,\n            mm_features=request.mm_features,\n            sampling_params=request.sampling_params,\n            pooling_params=request.pooling_params,\n            arrival_time=request.arrival_time,\n            lora_request=request.lora_request,\n            cache_salt=request.cache_salt,\n            priority=request.priority,\n            trace_headers=request.trace_headers,\n            block_hasher=block_hasher,\n            resumable=request.resumable,\n            session_id=request.session_id,\n            kv_hints=request.kv_hints,\n            reasoning_ended=request.reasoning_ended,\n            reasoning_parser_kwargs=request.reasoning_parser_kwargs,\n            abort_immediately=request.abort_immediately,\n            block_hashes=block_hashes,\n        )",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/request.py#L257-L285",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/request.py#L257-L285",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "为什么前端请求与调度器中的 Request 分成两种对象？block_hasher 从哪里作为参数传入？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "request-status",
+      "Title": "RequestStatus：等待、运行、抢占与结束",
+      "Tier": "A",
+      "Summary": "请求状态枚举区分普通等待、等待语法、等待远程 KV、流式输入等待、运行、抢占及多种结束原因。抢占表示暂时退出执行，不等于请求已完成。",
+      "Approach": "is_finished 使用 status > PREEMPTED 判断终态；枚举顺序因此具有实现意义。FINISHED_STOPPED、LENGTH_CAPPED、ABORTED、ERROR 等分别表达停止条件、长度上限、取消和错误。状态声明只说明合法状态集合；具体转换时机需追踪调度器赋值，不能从枚举顺序推断运行顺序。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/request.py L422-L449\nclass RequestStatus(enum.IntEnum):\n    \"\"\"Status of a request.\"\"\"\n\n    WAITING = enum.auto()\n    WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR = enum.auto()\n    WAITING_FOR_REMOTE_KVS = enum.auto()\n    WAITING_FOR_STREAMING_REQ = enum.auto()\n    RUNNING = enum.auto()\n    PREEMPTED = enum.auto()\n    # Note: anything after PREEMPTED will be considered\n    # as a finished status.\n    FINISHED_STOPPED = enum.auto()\n    FINISHED_LENGTH_CAPPED = enum.auto()\n    FINISHED_ABORTED = enum.auto()\n    FINISHED_IGNORED = enum.auto()\n    FINISHED_ERROR = enum.auto()\n    FINISHED_REPETITION = enum.auto()\n\n    def __str__(self) -> str:\n        return self.name\n\n    @staticmethod\n    def is_finished(status: \"RequestStatus\") -> bool:\n        return status > RequestStatus.PREEMPTED\n\n    @staticmethod\n    def get_finished_reason(status: \"RequestStatus\") -> FinishReason | None:\n        return _FINISHED_REASON_MAP.get(status)",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/request.py#L422-L449",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/request.py#L422-L449",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "PREEMPTED 为什么不是 finished？若把一个非终态加在 PREEMPTED 后会怎样？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "scheduler-output",
+      "Title": "SchedulerOutput：本轮执行计划",
+      "Tier": "CORE",
+      "Summary": "调度器输出的执行计划告诉 Worker 本轮算哪些请求、各算多少 token，以及缓存与请求状态有哪些变化。它不是模型输出，也不是最终生成文本。",
+      "Approach": "scheduled_new_reqs 携带首次执行所需的数据；scheduled_cached_reqs 对已在 Worker 缓存的请求发送增量。num_scheduled_tokens 按请求记录预算，total_num_scheduled_tokens 是总量。finished_req_ids 通知 Worker 清理状态；草稿 token、encoder 输入、KV connector 元数据和新块清零列表支持可选路径。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/core/sched/output.py L241-L280\nclass SchedulerOutput:\n    # list of the requests that are scheduled for the first time.\n    # We cache the request's data in each worker process, so that we don't\n    # need to re-send it every scheduling step.\n    scheduled_new_reqs: list[NewRequestData]\n    # list of the requests that have been scheduled before.\n    # Since the request's data is already cached in the worker processes,\n    # we only send the diff to minimize the communication cost.\n    scheduled_cached_reqs: CachedRequestData\n\n    # req_id -> num_scheduled_tokens\n    # Number of tokens scheduled for each request.\n    num_scheduled_tokens: dict[str, int]\n    # Total number of tokens scheduled for all requests.\n    # Equal to sum(num_scheduled_tokens.values())\n    total_num_scheduled_tokens: int\n    # req_id -> spec_token_ids\n    # If a request does not have any spec decode tokens, it will not be\n    # included in the dictionary.\n    scheduled_spec_decode_tokens: dict[str, list[int]]\n    # req_id -> encoder input indices that need processing.\n    # E.g., if a request has [0, 1], it could mean the vision encoder needs\n    # to process that the request's 0-th and 1-th images in the current step.\n    scheduled_encoder_inputs: dict[str, list[int]]\n\n    # Request IDs that are finished in between the previous and the current\n    # steps. This is used to notify the workers about the finished requests\n    # so that they can free the cached states for those requests.\n    finished_req_ids: set[str]\n    # list of mm_hash strings associated with the encoder outputs to be\n    # freed from the encoder cache.\n    free_encoder_mm_hashes: list[str]\n\n    # Request-local CPU payload updates: None releases a consumed input; a\n    # payload restores it for re-encoding after KV-load rollback. GPU embeddings\n    # and the feature's identifier/placeholder metadata are unaffected.\n    encoder_input_updates: dict[str, dict[int, \"MultiModalKwargsItem | None\"]] = field(\n        default_factory=dict\n    )\n",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/core/sched/output.py#L241-L346",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/core/sched/output.py#L241-L346",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "为什么要把首次请求与缓存请求分开？本轮 token 预算是否等于本轮返回给用户的 token 数？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "kv-prefix-lookup",
+      "Title": "前缀缓存查询：找可复用的计算结果",
+      "Tier": "CORE",
+      "Summary": "前缀缓存保存已计算输入对应的 KV，使相同前缀的后续请求少做重复计算。查询返回缓存块、可复用 token 数和共享前缀边界；命中并不等于整次请求不用计算。",
+      "Approach": "先检查 prefix_cache_lookup_enabled；禁止读取时返回空块和零计数。再按请求给出的最大命中长度查询 coordinator.find_longest_cache_hit。源码注释说明：为获得 logits，全部提示词命中时仍需重新计算末尾 token；块对齐可能放大重算范围。稀疏保留组还需要 shared_prefix_boundary，防止后续重用断开。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/core/kv_cache_manager.py L288-L327\n    def get_computed_blocks(\n        self, request: Request, max_cache_hit_length: int | None = None\n    ) -> tuple[KVCacheBlocks, int, int]:\n        \"\"\"Get the computed (cached) blocks for the request.\n        Note that the computed blocks must be full.\n\n        Args:\n            request: The request to get the computed blocks.\n            max_cache_hit_length: Upper bound on the hit length. Defaults to\n                `request.get_max_cache_hit_length()`; explicit bounds can only\n                reduce the request's cache hit limit.\n\n        Returns:\n            A tuple containing:\n                - A list of blocks that are computed for the request.\n                - The number of computed tokens.\n                - `shared_prefix_boundary`: the block-aligned token position of\n                  a shared prefix that a sparse-retention group (Mamba / sliding\n                  window) has not cached yet (Marconi-style APC), or 0 if none.\n                  Pinned so sparse prefix-cache retention does not drop\n                  the junction and defeat cross-request reuse.\n\n        \"\"\"\n        # We skip finding the prefix cache hit when prefix caching is\n        # disabled or the request is marked as skipping kv cache read\n        # (which happens when the request requires prompt logprobs\n        # or calls a pooling model with all pooling).\n        if not self.prefix_cache_lookup_enabled(request):\n            return self.empty_kv_cache_blocks, 0, 0\n\n        # NOTE: When all tokens hit the cache, we must recompute the last token\n        # to obtain logits. Thus, set max_cache_hit_length to prompt_length - 1.\n        # This can trigger recomputation of an entire block, rather than just\n        # the single last token, because allocate_slots() requires\n        # num_computed_tokens to be block-size aligned. Removing this limitation\n        # could slightly improve performance in the future.\n        max_cache_hit_length = request.get_max_cache_hit_length(max_cache_hit_length)\n        computed_blocks, num_new_computed_tokens, num_uncached = (\n            self.coordinator.find_longest_cache_hit(\n                request.block_hashes, max_cache_hit_length",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/core/kv_cache_manager.py#L288-L350",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/core/kv_cache_manager.py#L288-L350",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "两个提示词完全相同时，为什么仍可能看到计算？缓存块、token 命中数和边界各有什么用途？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "kv-pool-allocate",
+      "Title": "BlockPool：领取可用缓存块",
+      "Tier": "CORE",
+      "Summary": "BlockPool 管理缓存块的空闲队列与引用计数。get_new_blocks 按数量领取空闲块，必要时移除旧缓存索引，并把块标记为正在被使用。",
+      "Approach": "申请数超过空闲数时抛错；正常路径从队头取块。启用缓存时，重新使用带 hash 的空闲块会调用 _maybe_evict_cached_block；随后要求 ref_cnt 为零并改成一。这里只管理块对象及索引，不执行设备上的注意力，也不直接创建一份新 GPU 张量。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/core/block_pool.py L681-L720\n    def get_new_blocks(self, num_blocks: int) -> list[KVCacheBlock]:\n        \"\"\"Get new blocks from the free block pool.\n\n        Note that we do not check block cache in this function.\n\n        Args:\n            num_blocks: The number of blocks to allocate.\n\n        Returns:\n            A list of new block.\n\n        \"\"\"\n        if num_blocks > self.get_num_free_blocks():\n            raise ValueError(f\"Cannot get {num_blocks} free blocks from the pool\")\n\n        ret: list[KVCacheBlock] = self.free_block_queue.popleft_n(num_blocks)\n\n        if self._reuse_watchers:\n            self._notify_reuse(ret)\n\n        # In order to only iterate the list once, we duplicated code a bit\n        if self.enable_caching:\n            if self.metrics_collector:\n                for block in ret:\n                    self._maybe_evict_cached_block(block)\n                    assert block.ref_cnt == 0\n                    block.ref_cnt = 1\n                    self.metrics_collector.on_block_allocated(block)\n            else:\n                for block in ret:\n                    # Most blocks were never cached, so skip the call when possible.\n                    if block.block_hash is not None:\n                        self._maybe_evict_cached_block(block)\n                    assert block.ref_cnt == 0\n                    block.ref_cnt = 1\n        else:\n            for block in ret:\n                assert block.ref_cnt == 0\n                block.ref_cnt = 1\n                if self.metrics_collector:",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/core/block_pool.py#L681-L722",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/core/block_pool.py#L681-L722",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "一个块已进入空闲队列，为什么仍可能带 block_hash？再次领取时为什么需要处理旧索引？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "kv-pool-free",
+      "Title": "BlockPool：引用计数与回收顺序",
+      "Tier": "S",
+      "Summary": "归还缓存块首先减少引用计数；只有降到零的块才重新进入空闲队列。请求释放块并不意味着共享缓存立刻消失。",
+      "Approach": "空块哨兵跳过；属于其他池的块转交对应池处理。无 hash、禁用缓存或指定 evict_first 的块放队头优先复用；仍有缓存 hash 的块放队尾，形成面向缓存的 LRU 淘汰顺序。该函数不保证在飞设备写入已结束；调度器的延迟释放机制负责这个上层时序条件。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/core/block_pool.py L798-L837\n    def free_blocks(\n        self, ordered_blocks: Iterable[KVCacheBlock], evict_first: bool = False\n    ) -> None:\n        \"\"\"Free a list of blocks. The blocks should be ordered by their\n        eviction priority, where the first block will be evicted first.\n\n        Args:\n            ordered_blocks: A list of blocks to free ordered by their eviction\n                priority.\n            evict_first: Also put freed cached blocks at the front of the free\n                queue, so they are evicted before other cached blocks. For\n                blocks whose contents another tier already holds.\n\n        \"\"\"\n        # Identify blocks with hash (LRU cache) and without it (never match APC)\n        blocks_to_evict_last = []\n        blocks_to_evict_first = []\n        other_pools: dict[BlockPool, list[KVCacheBlock]] = {}\n        for block in ordered_blocks:\n            if block.is_null:  # never pooled; its ref_cnt is not maintained\n                continue\n            if block.pool is not None and block.pool is not self._weak_self:\n                pool = block.pool()\n                if pool is not None:\n                    other_pools.setdefault(pool, []).append(block)\n                continue\n            block.ref_cnt -= 1\n            if block.ref_cnt == 0:\n                if block.block_hash is None or not self.enable_caching or evict_first:\n                    # LIFO reuse of non-cached blocks for better GPU locality,\n                    # and of cached ones when asked to evict them first.\n                    blocks_to_evict_first.append(block)\n                else:\n                    # FIFO reuse of cached blocks for LRU eviction behavior.\n                    blocks_to_evict_last.append(block)\n\n        # Blocks to reuse first are prepended to the front of the free queue.\n        self.free_block_queue.prepend_n(blocks_to_evict_first)\n        # Blocks to reuse last are appended to the end of the free queue.\n        self.free_block_queue.append_n(blocks_to_evict_last)",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/core/block_pool.py#L798-L839",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/core/block_pool.py#L798-L839",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "两个请求共享一个块，结束其中一个后能否立刻复用这个块？延迟释放与引用计数解决的是同一个问题吗？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "sample-token",
+      "Title": "Sampler：从 logits 得到 token",
+      "Tier": "CORE",
+      "Summary": "logits 是模型为词表中候选 token 计算的分数。Sampler 接收 logits 和本轮输入批次，按请求参数取样，并返回 token、概率统计和有效采样数量。",
+      "Approach": "__call__ 先得到请求与位置映射，再调用 sample；需要 logprobs 时计算相应分数。尚未完成分块预填充的请求不产生有效输出 token，不能把前向 token 数当作生成数量。普通路径 sampled_token_ids 整理为二维，每请求一列；num_sampled 才反映该请求本轮有效产出。温度、惩罚和 top-k/top-p 的实现继续从 sample 追踪。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/worker/gpu/sample/sampler.py L131-L170\n    def __call__(\n        self,\n        logits: torch.Tensor,\n        input_batch: InputBatch,\n    ) -> SamplerOutput:\n        expanded_idx_mapping = input_batch.expanded_idx_mapping\n        idx_mapping = input_batch.idx_mapping\n        idx_mapping_np = input_batch.idx_mapping_np\n        cu_num_logits_np = input_batch.cu_num_logits_np\n        expanded_local_pos = input_batch.expanded_local_pos\n        pos = input_batch.positions[input_batch.logits_indices]\n        input_ids = input_batch.input_ids[input_batch.logits_indices]\n        seq_lens_upper_bound_np = input_batch.seq_lens_cpu_upper_bound.numpy()\n\n        # NOTE(woosuk): We intentionally compute num_nans before sampling to make clear\n        # that num_nans is computed before applying penalties and temperature.\n        num_nans = get_num_nans(logits) if self.compute_nans else None\n\n        logprobs_dims = self.get_logprobs_dims(idx_mapping_np)\n\n        sampled, processed_logits = self.sample(\n            logits,\n            expanded_idx_mapping,\n            idx_mapping,\n            idx_mapping_np,\n            pos,\n            input_ids,\n            expanded_local_pos,\n            seq_lens_upper_bound_np,\n            return_logprobs=logprobs_dims is not None,\n        )\n\n        if self.trace_replay_state is not None:\n            # Overwrite sampled tokens with the replay trace up-front so that\n            # computed logprobs reflect the real distribution of the forced token.\n            self.trace_replay_state.apply_trace(sampled, idx_mapping)\n\n        if logprobs_dims is not None:\n            num_logprobs, max_per_req_token_ids = logprobs_dims\n            if self.logprobs_mode in PROCESSED_LOGPROBS_MODES:",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/worker/gpu/sample/sampler.py#L131-L221",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/worker/gpu/sample/sampler.py#L131-L221",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "为什么执行了前向却没有可返回的新 token？sampled_token_ids 的形状与 num_sampled 有何区别？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "spec-verify",
+      "Title": "推测解码：验证草稿并统计接受数量",
+      "Tier": "S",
+      "Summary": "推测解码先提出多个候选 token，再由目标模型验证。RejectionSampler 接收目标 logits、输入批次和可选草稿 logits，返回接受后的 token 与拒绝数量。",
+      "Approach": "__call__ 通过 gather_draft_sampled 取草稿与位置，调用 _verify_in_chunks 分块验证，再用 get_num_sampled_and_rejected 计算有效产出与拒绝量，组装 SamplerOutput。这里核对的是验证入口和数据流；接受概率算法在下层，不能据入口断言所有配置都采用同一算法或一定提速。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/worker/gpu/spec_decode/rejection_sampler.py L429-L468\n    def __call__(\n        self,\n        logits: torch.Tensor,\n        input_batch: InputBatch,\n        draft_logits: DraftLogitsCache | None = None,\n    ) -> SamplerOutput:\n        # NOTE(woosuk): We intentionally compute num_nans before sampling to make clear\n        # that num_nans is computed before applying penalties and temperature.\n        num_nans = get_num_nans(logits) if self.sampler.compute_nans else None\n\n        draft_sampled, pos = gather_draft_sampled(\n            input_batch.input_ids,\n            input_batch.positions,\n            input_batch.logits_indices,\n            input_batch.expanded_idx_mapping,\n            input_batch.expanded_local_pos,\n            self.sampler.req_states.prefill_len.gpu,\n        )\n\n        logprobs_dims = self.sampler.get_logprobs_dims(input_batch.idx_mapping_np)\n        chunk_logit_limit = get_max_chunk_logits(logits.shape[1])\n        (\n            sampled,\n            num_sampled,\n            logprobs_tensors,\n            sampling_mask_tensors,\n        ) = self._verify_in_chunks(\n            logits,\n            input_batch,\n            draft_logits,\n            draft_sampled,\n            pos,\n            chunk_logit_limit,\n            logprobs_dims,\n        )\n\n        num_sampled, num_rejected = get_num_sampled_and_rejected(\n            num_sampled,\n            input_batch.seq_lens,\n            input_batch.cu_num_logits,",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/worker/gpu/spec_decode/rejection_sampler.py#L429-L480",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/worker/gpu/spec_decode/rejection_sampler.py#L429-L480",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "草稿数为四是否保证一次返回五个 token？性能判断还需要记录哪些接受率和执行成本？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "output-process",
+      "Title": "OutputProcessor：把引擎输出交给请求方",
+      "Tier": "CORE",
+      "Summary": "输出处理器按 request_id 找到前端请求状态，把引擎产出的 token 处理成 RequestOutput，写入异步请求队列或返回结果列表，并收集需要通知引擎中止的请求。",
+      "Approach": "没有对应状态的输出会被忽略，例如请求已被取消。正常路径更新统计、反分词与概率信息，再用 make_request_output 创建结果；有 queue 时调用 put，没有 queue 时加入返回列表。命中前端停止条件而引擎尚未结束时，需要把 ID 放进 reqs_to_abort；不是只停止前端显示。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/engine/output_processor.py L731-L770\n    def process_outputs(\n        self,\n        engine_core_outputs: list[EngineCoreOutput],\n        engine_core_timestamp: float | None = None,\n        iteration_stats: IterationStats | None = None,\n        weight_version: str | None = None,\n    ) -> OutputProcessorOutput:\n        \"\"\"Process the EngineCoreOutputs:\n        1) Compute stats for logging\n        2) Detokenize\n        3) Create and handle RequestOutput objects:\n            * If there is a queue (for usage with AsyncLLM),\n              put the RequestOutput objects into the queue for\n              handling by the per-request generate() tasks.\n\n            * If there is no queue (for usage with LLMEngine),\n              return a list of RequestOutput objects.\n\n        NOTE FOR DEVELOPERS\n\n        vLLM V1 minimizes the number of python loops over the full\n        batch to ensure system overheads are minimized. This is the\n        only function that should loop over EngineCoreOutputs.\n\n        If you need to touch every element of the batch, do it from\n        within the loop below.\n        \"\"\"\n        request_outputs: list[RequestOutput | PoolingRequestOutput] = []\n        reqs_to_abort: list[str] = []\n        for engine_core_output in engine_core_outputs:\n            req_id = engine_core_output.request_id\n            req_state = self.request_states.get(req_id)\n            if req_state is None:\n                # Ignore output for already-aborted request.\n                continue\n\n            error = engine_core_output.error\n            if error is not None and req_state.queue is not None:\n                # Rejected on arrival, e.g. by a paused engine; nothing was run.\n                req_state.queue.put(error.to_exception())",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/output_processor.py#L731-L897",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/output_processor.py#L731-L897",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "为什么检测到停止字符串后还要通知引擎 abort？异步与同步调用者在哪里分流？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "detokenize-stop",
+      "Title": "反分词与停止字符串：token 变成文本",
+      "Tier": "A",
+      "Summary": "反分词把新生成的 token 编号逐步转换成文本，并检查停止字符串。停止字符串可能跨多个 token，不能简单用单个 token 编号判断。",
+      "Approach": "update 对每个新 token 调用 decode_next，更新累计文本并记录 token 对应的字符边界。满足 min_tokens 后调用 check_stop_strings；命中时按 include_stop_str_in_output 决定文本保留范围，还裁掉同一轮多生成的后续 token。返回值是匹配到的停止字符串或 None，不是新文本本身。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/engine/detokenizer.py L98-L137\n    def update(self, new_token_ids: list[int], stop_terminated: bool) -> str | None:\n        \"\"\"Update RequestState for the request_id by:\n            1) Detokenize the new token ids incrementally.\n            2) Evaluate stop criteria.\n\n        Return matched stop string or None.\n        \"\"\"\n        if not new_token_ids:\n            # Skip detokenization if no new token ids.\n            return None\n\n        if stop_terminated and not self.include_stop_str_in_output:\n            # If stop-terminated, exclude last token from detokenization\n            # based on include_stop_str_in_output parameter.\n            skipped_stop_token_id = new_token_ids[-1]\n            new_token_ids = new_token_ids[:-1]\n        else:\n            skipped_stop_token_id = None\n\n        # 1) Detokenize the new token ids incrementally.\n        num_prev_tokens = self.num_output_tokens()\n        first_new_token_index = len(self.token_ids)\n        # Output text offsets at the boundaries of the new tokens.\n        token_offsets = [len(self.output_text)] if self.stop else None\n        for new_token_id in new_token_ids:\n            self.token_ids.append(new_token_id)\n            self.output_text += self.decode_next(new_token_id)\n            if token_offsets is not None:\n                token_offsets.append(len(self.output_text))\n\n        if skipped_stop_token_id is not None:\n            # Cleanup after skipping detokenization.\n            self.token_ids.append(skipped_stop_token_id)\n            if token_offsets is not None:\n                token_offsets.append(len(self.output_text))\n\n        # 2) Evaluate stop strings.\n        stop_string = None\n        if token_offsets is not None and self.num_output_tokens() > self.min_tokens:\n            # Support min_tokens, see https://github.com/vllm-project/vllm/pull/22014",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/detokenizer.py#L98-L157",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/detokenizer.py#L98-L157",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "为什么要保留 token_offsets？update 返回 None 能否说明没有产生文字？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "structured-grammar",
+      "Title": "结构化输出：准备语法约束",
+      "Tier": "S",
+      "Summary": "结构化输出通过语法限制可生成的 token，帮助请求满足 JSON 等结构。grammar_init 根据请求选择的后端创建语法对象，必要时异步编译。",
+      "Approach": "没有 structured_output_request 时直接返回；同一引擎已有后端时拒绝不同后端混用。首次使用按 xgrammar、guidance、outlines 或 lm-format-enforcer 初始化后端。异步路径把 _create_grammar 提交给 executor，结果作为 Future 保存；等待语法就绪与后续 bitmask 生成是另一些步骤。语法约束不保证内容事实正确。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm/v1/structured_output/__init__.py L134-L173\n    def grammar_init(self, request: \"Request\") -> None:\n        if request.structured_output_request is None:\n            return\n\n        sampling_params = request.sampling_params\n        assert sampling_params is not None\n        structured_outputs = sampling_params.structured_outputs\n        assert structured_outputs is not None\n        request_backend = structured_outputs._backend\n        assert request_backend is not None\n        if self.backend_name is not None and request_backend != self.backend_name:\n            raise VLLMValidationError(\n                \"Structured output processing only supports one backend per engine. \"\n                f\"The engine is already using '{self.backend_name}', but this \"\n                f\"request resolved to '{request_backend}'. Configure \"\n                \"`structured_outputs_config.backend` explicitly or use schemas \"\n                \"supported by the initialized backend.\"\n            )\n\n        # Initialize the backend the first time it is needed.\n        #\n        # NOTE: We only support a single backend. We do NOT support different\n        # backends on a per-request basis in V1 (for now, anyway...).\n        # _backend is set in Processor._validate_structured_output\n        if self.backend is None:\n            vocab_size = self.vllm_config.model_config.get_vocab_size()\n            if request_backend == \"xgrammar\":\n                self.backend = XgrammarBackend(\n                    self.vllm_config,\n                    tokenizer=self.tokenizer,\n                    vocab_size=vocab_size,\n                )\n            elif request_backend == \"guidance\":\n                self.backend = GuidanceBackend(\n                    self.vllm_config,\n                    tokenizer=self.tokenizer,\n                    vocab_size=vocab_size,\n                )\n            elif request_backend == \"outlines\":\n                from vllm.v1.structured_output.backend_outlines import OutlinesBackend",
+      "Sources": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/structured_output/__init__.py#L134-L205",
+      "Version": "vllm@c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/structured_output/__init__.py#L134-L205",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "为什么准备语法可能让请求进入等待状态？符合 JSON 语法是否等于回答内容正确？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "ascend-attn-contract",
+      "Title": "AscendAttentionBackend：实现类与缓存布局契约",
+      "Tier": "CORE",
+      "Summary": "注意力后端描述使用哪个计算实现、哪个元数据构造器以及 KV 缓存布局。它把平台选择结果接到实际注意力执行，不在类选择阶段完成注意力计算。",
+      "Approach": "get_impl_cls 和 get_builder_cls 在 DCP 启用时选择对应专用实现，否则使用普通实现。get_kv_cache_shape 对 LBHNC/HND 返回 (2, blocks, kv_heads, block_size, head_size)，其他布局返回 (2, blocks, block_size, kv_heads, head_size)。最前面的 2 区分 K 与 V；支持的 kernel block size 在此返回 [128]，不能推广到全部 Ascend 注意力后端。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm_ascend/attention/attention_v1.py L76-L115\nclass AscendAttentionBackend(AttentionBackend):\n    accept_output_buffer: bool = True\n\n    @staticmethod\n    def get_name() -> str:\n        return \"CUSTOM\"\n\n    @classmethod\n    def supports_batch_invariance(cls) -> bool:\n        # vLLM #60271 added the batch-invariance support check in\n        # `init_attn_backend` in both supported vLLM revisions.\n        return True\n\n    @staticmethod\n    def get_impl_cls() -> type[\"AscendAttentionBackendImpl\"]:\n        if is_dcp_enabled():\n            from vllm_ascend.attention.context_parallel.attention_cp import AscendAttentionDCPImpl\n\n            return AscendAttentionDCPImpl\n        return AscendAttentionBackendImpl\n\n    @staticmethod\n    def get_builder_cls() -> type[\"AscendAttentionMetadataBuilder\"]:\n        if is_dcp_enabled():\n            from vllm_ascend.attention.context_parallel.attention_cp import AscendAttentionDCPMetadataBuilder\n\n            return AscendAttentionDCPMetadataBuilder\n        return AscendAttentionMetadataBuilder\n\n    @classmethod\n    def supports_pcp(cls) -> bool:\n        # vLLM checks this capability before any instance-level PCP dispatch.\n        # The main backend owns both the ordinary GQA implementation and its\n        # DCP specialization. Keep derived backends such as 310P and C8 opted\n        # out unless they declare support themselves.\n        return cls is AscendAttentionBackend\n\n    @staticmethod\n    def get_kv_cache_shape(\n        num_blocks: int,",
+      "Sources": "https://github.com/vllm-project/vllm-ascend/blob/e4d533d33211f0696bcdf65eda47245d52e428c5/vllm_ascend/attention/attention_v1.py#L76-L153",
+      "Version": "vllm-ascend@e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm-ascend/blob/e4d533d33211f0696bcdf65eda47245d52e428c5/vllm_ascend/attention/attention_v1.py#L76-L153",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "为什么交换 block_size 和 kv_heads 的维度顺序会影响算子读取？后端类和实现类分别负责什么？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "ascend-attn-metadata",
+      "Title": "注意力元数据：块表、位置与有效长度",
+      "Tier": "CORE",
+      "Summary": "元数据构造器把通用批次信息转成 AscendMetadata，告诉注意力实现每个请求读哪些缓存块、把新 KV 写到哪些位置、哪些 token 真正有效。",
+      "Approach": "build 取得 block_table_tensor、slot_mapping 与 query_start_loc，区分 decode/prefill 的请求和 token 数，选择序列长度并构造 attention mask。返回对象带 block_tables、slot_mapping、seq_lens、actual_seq_lengths_q 和实际 token 数。图执行可能包含补齐 token，因此真实长度与张量容量不可混为一谈。PCP 专用元数据另行 finalize。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm_ascend/attention/attention_v1.py L327-L366\n    def build(\n        self,\n        common_prefix_len: int,\n        common_attn_metadata: AscendCommonAttentionMetadata,\n        fast_build: bool = False,\n    ) -> AscendMetadata:\n        pcp_shard_slot_mapping = (\n            common_attn_metadata.slot_mapping if uses_pcp_sharded_layout(common_attn_metadata, self.use_pcp) else None\n        )\n        num_reqs = common_attn_metadata.num_reqs\n        num_actual_tokens = common_attn_metadata.num_actual_tokens\n        query_start_loc_cpu = common_attn_metadata.query_start_loc_cpu[: num_reqs + 1]\n\n        num_decodes, num_prefills, num_decode_tokens, num_prefill_tokens = self._split_decodes_and_prefills(\n            common_attn_metadata\n        )\n\n        block_table = common_attn_metadata.block_table_tensor\n\n        # TODO: This will be moved to propose and deleted after fia ops fixed.\n        seq_lens = _select_seq_lens(\n            common_attn_metadata,\n            kv_cache_spec=self.kv_cache_spec,\n            speculative_config=self.speculative_config,\n            vllm_config=self.vllm_config,\n        )\n        slot_mapping = common_attn_metadata.slot_mapping[:num_actual_tokens]\n        # this slot_mapping override doesn't work since vllm will override it again. We should fix it vllm.\n        # see: https://github.com/vllm-project/vllm/blob/ce88756b967c2c5006746a424c15dd59a284ed8c/vllm/model_executor/layers/attention/cross_attention.py#L117\n        if isinstance(self.kv_cache_spec, CrossAttentionSpec):\n            slot_mapping = common_attn_metadata.slot_mapping.to(torch.int32)\n\n        attn_state = common_attn_metadata.attn_state\n\n        # Get attn_mask from singleton AttentionMaskBuilder\n        attn_mask = self.attn_mask_builder.get_attention_mask(common_attn_metadata.causal, self.model_config)\n\n        # TODO: Yet another unnecessary H2D while we already have a query_start_loc on device\n        query_start_loc = query_start_loc_cpu.pin_memory().to(self.device, non_blocking=True)\n",
+      "Sources": "https://github.com/vllm-project/vllm-ascend/blob/e4d533d33211f0696bcdf65eda47245d52e428c5/vllm_ascend/attention/attention_v1.py#L327-L465",
+      "Version": "vllm-ascend@e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm-ascend/blob/e4d533d33211f0696bcdf65eda47245d52e428c5/vllm_ascend/attention/attention_v1.py#L327-L465",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "block_tables 与 slot_mapping 分别面向读取还是写入？补齐 token 为什么不能被当成真实请求内容？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "ascend-attn-forward",
+      "Title": "Ascend 注意力前向：写缓存并计算输出",
+      "Tier": "CORE",
+      "Summary": "普通 Ascend 注意力实现接收 Q/K/V、KV 缓存、元数据和输出缓冲区，先准备缓存视图、按需写入新的 K/V，再选择注意力计算路径并写回结果。",
+      "Approach": "必须提供 output；本实现不支持 output_scale/output_block_scale 融合输出量化，缺元数据时返回零填充结果。存在新 K/V 时按 PCP 布局选择 _reshape_and_cache_pcp 或 reshape_and_cache；pooling 的双向/encoder-only 分支调用 _forward_encoder_attention，其余调用 forward_impl。此处不推断 torch_npu/CANN 底层 kernel 的具体实现或性能。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm_ascend/attention/attention_v1.py L1352-L1391\n    def forward(\n        self,\n        layer: AttentionLayer,\n        query: torch.Tensor,\n        key: torch.Tensor,\n        value: torch.Tensor,\n        kv_cache: tuple[torch.Tensor],\n        attn_metadata: AscendMetadata,\n        output: torch.Tensor | None = None,\n        output_scale: torch.Tensor | None = None,\n        output_block_scale: torch.Tensor | None = None,\n    ) -> torch.Tensor:\n        \"\"\"Forward pass with Ascend attention.\n        Args:\n            query: shape = [num_tokens, num_heads, head_size]\n            key: shape = [num_tokens, num_kv_heads, head_size]\n            value: shape = [num_tokens, num_kv_heads, head_size]\n            kv_cache: shape =\n                [2, num_blocks, block_size, num_kv_heads, head_size]\n            attn_metadata: Metadata for attention.\n        Returns:\n            shape = [num_tokens, num_heads * head_size]\n        \"\"\"\n        assert output is not None, \"Output tensor must be provided.\"\n        self._layer_name = layer.layer_name\n\n        if output_scale is not None or output_block_scale is not None:\n            raise NotImplementedError(\"fused output quantization is not yet supported for AscendAttentionBackendImpl\")\n\n        assert layer._k_scale_float == 1.0 and layer._v_scale_float == 1.0\n        num_tokens = query.shape[0]\n        if attn_metadata is None:\n            return output.fill_(0)\n\n        # Initialize key_cache and value_cache from kv_cache if not already set.\n        # This is needed for DecodeOnly mode where key/value are None but we still\n        # need access to the cache for attention computation.\n        if self.key_cache is None and kv_cache is not None:\n            if (\n                isinstance(kv_cache, torch.Tensor)",
+      "Sources": "https://github.com/vllm-project/vllm-ascend/blob/e4d533d33211f0696bcdf65eda47245d52e428c5/vllm_ascend/attention/attention_v1.py#L1352-L1426",
+      "Version": "vllm-ascend@e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm-ascend/blob/e4d533d33211f0696bcdf65eda47245d52e428c5/vllm_ascend/attention/attention_v1.py#L1352-L1426",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "为什么 DecodeOnly 分支可能没有新 key/value 但仍需访问缓存？本函数的量化限制能否代表全部后端？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "ascend-mla-forward",
+      "Title": "MLA 前向：压缩缓存与预填充/解码分流",
+      "Tier": "S",
+      "Summary": "MLA 是多头潜在注意力：使用压缩表示组织 KV。该前向接收 hidden_states、缓存和元数据，分别处理解码与预填充，再进行输出投影。",
+      "Approach": "融合缓存张量通过切片视图拆成 NoPE/RoPE 两部分；num_decode_tokens 划分批次前后段。预处理按设备能力、缓存形式及并行条件选择分支，解码使用外部 FlashMLA 或 _forward_decode，预填充进入 _forward_prefill；结果填入 o_proj_input，再调用 o_proj 并按需保存 KV 层。这里核对数据组织与分支，不声称所有模型都会选中这条 MLA 实现。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm_ascend/attention/mla_v1.py L3329-L3368\n    def forward(\n        self,\n        layer_name,\n        hidden_states: torch.Tensor,  # query in unified attn\n        kv_cache: torch.Tensor | tuple[torch.Tensor, ...],\n        attn_metadata: M,\n        output: torch.Tensor | None = None,\n    ) -> torch.Tensor:\n        assert output is not None, \"Output tensor must be provided.\"\n        if attn_metadata is None:\n            # Profiling run.\n            return output.fill_(0)\n\n        num_actual_tokens = self.get_num_actual_tokens(attn_metadata)\n        assert (\n            attn_metadata.num_decodes is not None\n            and attn_metadata.num_prefills is not None\n            and attn_metadata.num_decode_tokens is not None\n        )\n\n        num_decode_tokens = attn_metadata.num_decode_tokens\n        # The runner stores a fused MLA cache as one tensor, while the legacy\n        # MLA implementation still expects separate NoPE/RoPE logical tensors.\n        # Split it here as zero-copy views.\n        fused_mla_cache = isinstance(kv_cache, torch.Tensor)\n        external_flash_cache = kv_cache if fused_mla_cache else None\n        if isinstance(kv_cache, torch.Tensor):\n            kv_cache = (\n                kv_cache[..., : self.kv_lora_rank],\n                kv_cache[..., self.kv_lora_rank :],\n            )\n\n        # Inputs and outputs may be padded for CUDA graphs\n        output_padded = output\n        o_proj_input_shape = (_EXTRA_CTX.num_tokens, self.num_heads * self.v_head_dim)\n        o_proj_input = torch.zeros(o_proj_input_shape, dtype=hidden_states.dtype, device=hidden_states.device)\n\n        gate = None\n        # ``use_output_gate`` is True whenever a standalone ``g_proj`` exists on\n        # either lane. On vLLM main a Kimi-K3 gate fused into the QKV-A",
+      "Sources": "https://github.com/vllm-project/vllm-ascend/blob/e4d533d33211f0696bcdf65eda47245d52e428c5/vllm_ascend/attention/mla_v1.py#L3329-L3475",
+      "Version": "vllm-ascend@e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm-ascend/blob/e4d533d33211f0696bcdf65eda47245d52e428c5/vllm_ascend/attention/mla_v1.py#L3329-L3475",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "为什么同一批次里可能同时有 decode 和 prefill？融合缓存切片是否一定分配新的缓存内存？",
+        "Evidence": []
+      }
+    },
+    {
+      "Id": "ascend-sample",
+      "Title": "Ascend 采样包装：复用上游与条件限制",
+      "Tier": "S",
+      "Summary": "NPU Runner 的 sample_tokens 在调用上游采样前处理 LM-head 张量并行限制与补齐信息，并在完成后结束本轮调试数据收集。LM-head 把隐状态映射为词表 logits。",
+      "Approach": "启用 lmhead TP 且请求 prompt logprobs 或固定 token prompt scoring 时，此路径抛出 NotImplementedError；源码注释解释未补齐的额外 compute_logits 会使集合通信不一致。其他情况准备 _lmhead_pad_size，调用 super().sample_tokens，再清理补齐状态并 _finalize_dump_data。版本适配与拒绝采样分流还位于本类其他方法；不是另写了一套完全独立的 NPU 采样器。\n证据范围：固定提交的静态源码核对；未运行 GPU/NPU 推理，不能据此认定两个仓库兼容或用户已掌握。",
+      "Code": "# vllm_ascend/worker/v2/model_runner.py L326-L350\n    def sample_tokens(self, grammar_output):\n        if (\n            lmhead_tp_enable()\n            and self.prompt_logprobs_worker is not None\n            and (\n                self.prompt_logprobs_worker.uses_prompt_logprobs.any()\n                or getattr(self.prompt_logprobs_worker, \"token_id_scores\", {})\n            )\n        ):\n            # The prompt-logprobs worker issues a second compute_logits with\n            # unpadded rows that desyncs the LM-head collectives and hangs.\n            # vLLM #54335 adds fixed-token scoring through the same unpadded\n            # compute_logits path, so it has the same collective restriction.\n            raise NotImplementedError(\n                \"prompt logprobs and fixed-token prompt scoring are not supported with lmhead TP.\"\n            )\n\n        state = self.execute_model_state\n        self._lmhead_pad_size = self._get_lmhead_pad_size(state) if state is not None and lmhead_tp_enable() else None\n        output = super().sample_tokens(grammar_output)\n        self._lmhead_pad_size = None\n        # Close the per-step msprobe dump cycle on the normal last-PP-rank\n        # path (v1 parity: v1 finalizes at the end of sample_tokens).\n        self._finalize_dump_data()\n        return output",
+      "Sources": "https://github.com/vllm-project/vllm-ascend/blob/e4d533d33211f0696bcdf65eda47245d52e428c5/vllm_ascend/worker/v2/model_runner.py#L326-L350",
+      "Version": "vllm-ascend@e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "Status": "源码静态复核 · 2026-11-13 · 未运行验证",
+      "Learning": {
+        "CodeUrl": "https://github.com/vllm-project/vllm-ascend/blob/e4d533d33211f0696bcdf65eda47245d52e428c5/vllm_ascend/worker/v2/model_runner.py#L326-L350",
+        "Goal": "能说明本节点的输入、输出、职责与条件边界，并从源码定位关键分支。",
+        "Question": "为什么 prompt logprobs 会影响 LM-head 并行的集合通信？super().sample_tokens 说明了什么复用关系？",
+        "Evidence": []
+      }
+    }
+  ],
+  "Edges": [
+    {
+      "From": "entry-async-llm",
+      "To": "input-process",
+      "Label": "调用输入处理",
+      "Evidence": "async_llm.py L497/L514；输入处理器返回 EngineCoreRequest。"
+    },
+    {
+      "From": "input-process",
+      "To": "engine-core-request-struct",
+      "Label": "创建请求数据",
+      "Evidence": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/input_processor.py#L361-L550：return EngineCoreRequest(...)。"
+    },
+    {
+      "From": "entry-async-llm",
+      "To": "client-ipc",
+      "Label": "经客户端提交（多进程配置）",
+      "Evidence": "AsyncLLM._add_request L598 调用客户端 add_request_async；AsyncMPClient L1374-L1377 转交 ADD 消息。"
+    },
+    {
+      "From": "client-ipc",
+      "To": "engine-core-request-struct",
+      "Label": "编码的请求载荷",
+      "Evidence": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/core_client.py#L1316-L1326；消息类型与 encoder.encode(request) 组成传输消息。不是调用请求类的执行方法。"
+    },
+    {
+      "From": "engine-core-request-struct",
+      "To": "request-runtime",
+      "Label": "字段转换",
+      "Evidence": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/request.py#L257-L285"
+    },
+    {
+      "From": "request-runtime",
+      "To": "request-status",
+      "Label": "状态词汇（学习关系）",
+      "Evidence": "RequestStatus 声明内部请求的状态集合；不是枚举顺序对应的调用链。"
+    },
+    {
+      "From": "scheduler-schedule",
+      "To": "scheduler-output",
+      "Label": "返回执行计划",
+      "Evidence": "Scheduler.schedule 返回 SchedulerOutput；字段定义：https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/core/sched/output.py#L241-L346"
+    },
+    {
+      "From": "scheduler-output",
+      "To": "model-runner-execute",
+      "Label": "经 Executor/Worker 传入",
+      "Evidence": "EngineCore.step L728-L731 经执行器派发；GPU Worker L1485-L1487 转交，非 SchedulerOutput 自行调用模型。"
+    },
+    {
+      "From": "kv-prefix-lookup",
+      "To": "kv-prefix-cache",
+      "Label": "查询与登记（概念配对）",
+      "Evidence": "get_computed_blocks 查询已计算缓存；cache_blocks 登记可复用前缀。两者职责配对，不是该查询方法直接调用登记方法。"
+    },
+    {
+      "From": "kv-block-alloc",
+      "To": "kv-pool-allocate",
+      "Label": "调用领取块",
+      "Evidence": "SingleTypeKVCacheManager.allocate_new_blocks L411 调用 block_pool.get_new_blocks。"
+    },
+    {
+      "From": "scheduler-preempt",
+      "To": "kv-pool-free",
+      "Label": "经管理器/延迟队列回收",
+      "Evidence": "Scheduler._free_request_blocks L3171-L3189；不保证抢占发生时立刻返回块池。"
+    },
+    {
+      "From": "kv-pool-allocate",
+      "To": "kv-pool-free",
+      "Label": "块生命周期（学习关系）",
+      "Evidence": "领取时 ref_cnt 由 0 变 1；归还时递减，归零才进入空闲队列。不是两函数直接互调。"
+    },
+    {
+      "From": "sample-token",
+      "To": "spec-verify",
+      "Label": "普通采样与草稿验证（对照）",
+      "Evidence": "两者都返回 SamplerOutput；草稿验证额外消费 draft_logits 并计算拒绝量，不表示普通采样总会触发推测解码。"
+    },
+    {
+      "From": "entry-output-loop",
+      "To": "output-process",
+      "Label": "调用处理批量输出",
+      "Evidence": "AsyncLLM._run_output_handler L919-L923 调用 output_processor.process_outputs。"
+    },
+    {
+      "From": "output-process",
+      "To": "detokenize-stop",
+      "Label": "委托反分词与停止检测",
+      "Evidence": "https://github.com/vllm-project/vllm/blob/c021a8b0a9049c39db7142823126b1c28a4fb85b/vllm/v1/engine/output_processor.py#L731-L897；process_outputs 调用请求 detokenizer.update。"
+    },
+    {
+      "From": "structured-grammar",
+      "To": "engine-step-detail-grammar",
+      "Label": "准备约束的前置阶段（学习关系）",
+      "Evidence": "语法初始化先准备 grammar/Future；step 后续请求位掩码。非 grammar_init 直接调用 step。"
+    },
+    {
+      "From": "attn-backend-select",
+      "To": "ascend-attn-contract",
+      "Label": "普通注意力类路径",
+      "Evidence": "platform.py L334-L336 返回 AscendAttentionBackend；其他模型/设备条件可选择别的类。"
+    },
+    {
+      "From": "ascend-attn-contract",
+      "To": "ascend-attn-metadata",
+      "Label": "返回构造器类",
+      "Evidence": "AscendAttentionBackend.get_builder_cls L98-L103，DCP 条件下另选专用类。"
+    },
+    {
+      "From": "ascend-attn-contract",
+      "To": "ascend-attn-forward",
+      "Label": "返回实现类",
+      "Evidence": "AscendAttentionBackend.get_impl_cls L90-L95，DCP 条件下另选专用类。"
+    },
+    {
+      "From": "ascend-attn-metadata",
+      "To": "ascend-attn-forward",
+      "Label": "提供元数据契约",
+      "Evidence": "builder 返回 AscendMetadata；forward 接收 attn_metadata。连接者是执行路径，不是 builder 直接调用 forward。"
+    },
+    {
+      "From": "attn-backend-select",
+      "To": "ascend-mla-forward",
+      "Label": "MLA 后端路径（间接）",
+      "Evidence": "platform.py L335 选择 AscendMLABackend，mla_v1.py get_impl_cls 返回 MLA 实现；不代表全部 Ascend 请求都使用 MLA。"
+    },
+    {
+      "From": "ascend-model-runner",
+      "To": "ascend-sample",
+      "Label": "同类方法细分",
+      "Evidence": "NPUModelRunner.sample_tokens 是独立方法；不是 execute_model 无条件直接调用它。"
+    },
+    {
+      "From": "ascend-sample",
+      "To": "sample-token",
+      "Label": "上游采样路径（间接）",
+      "Evidence": "NPUModelRunner.sample_tokens L345 调用 super；同类采样分流 L1170-L1192 根据草稿数量选 sampler/rejection_sampler。"
+    },
+    {
+      "From": "ascend-sample",
+      "To": "spec-verify",
+      "Label": "存在草稿时的验证分支（间接）",
+      "Evidence": "Ascend model_runner.py L1170-L1192；0.33.0 与其他版本有参数差异，两个独立快照未做兼容验证。"
+    },
+    {
+      "Evidence": "core.py L407 经 Executor.initialize_from_config 下发；NPUWorker.initialize_from_config 接收配置再初始化 Runner。是否跨进程取决于 Executor 拓扑，不能断言两层必在不同进程。",
+      "From": "engine-core-kv-init",
+      "Label": "两级转交后落到 runner.initialize_kv_cache",
+      "To": "ascend-model-runner"
+    },
+    {
+      "Evidence": "学习前置：allocate_new_blocks 使用请求块表；检测 _partial_hit_reqs 后执行 CoW，并非此处把请求写入 _partial_hit_reqs。cache_blocks 再结合计算进度和 block_hashes 登记。",
+      "From": "kv-block-alloc",
+      "Label": "阅读前置",
+      "To": "kv-prefix-cache"
+    }
+  ],
+  "NodeModules": [
+    {
+      "NodeId": "engine-core-request-struct",
+      "ModuleId": "entry"
+    },
+    {
+      "NodeId": "input-process",
+      "ModuleId": "entry"
+    },
+    {
+      "NodeId": "client-ipc",
+      "ModuleId": "entry"
+    },
+    {
+      "NodeId": "request-runtime",
+      "ModuleId": "cache"
+    },
+    {
+      "NodeId": "request-status",
+      "ModuleId": "cache"
+    },
+    {
+      "NodeId": "scheduler-output",
+      "ModuleId": "engine"
+    },
+    {
+      "NodeId": "kv-prefix-lookup",
+      "ModuleId": "cache"
+    },
+    {
+      "NodeId": "kv-pool-allocate",
+      "ModuleId": "cache"
+    },
+    {
+      "NodeId": "kv-pool-free",
+      "ModuleId": "cache"
+    },
+    {
+      "NodeId": "sample-token",
+      "ModuleId": "execution"
+    },
+    {
+      "NodeId": "spec-verify",
+      "ModuleId": "execution"
+    },
+    {
+      "NodeId": "output-process",
+      "ModuleId": "entry"
+    },
+    {
+      "NodeId": "detokenize-stop",
+      "ModuleId": "entry"
+    },
+    {
+      "NodeId": "structured-grammar",
+      "ModuleId": "engine"
+    },
+    {
+      "NodeId": "ascend-attn-contract",
+      "ModuleId": "attention"
+    },
+    {
+      "NodeId": "ascend-attn-metadata",
+      "ModuleId": "attention"
+    },
+    {
+      "NodeId": "ascend-attn-forward",
+      "ModuleId": "attention"
+    },
+    {
+      "NodeId": "ascend-mla-forward",
+      "ModuleId": "attention"
+    },
+    {
+      "NodeId": "ascend-sample",
+      "ModuleId": "npu"
+    }
+  ]
+}

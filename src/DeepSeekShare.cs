@@ -92,7 +92,7 @@ namespace ElymsPet {
         string fileId=MiniJson.GetString(file,"id");if(!Regex.IsMatch(fileId,@"^[a-zA-Z0-9_-]{1,100}$")||!ids.Add(fileId))continue;
         if(selected.Length==0||selected==fileId)files.Add(file);
        }
-      } else if(type=="THINK"||type=="RESPONSE"||type=="TEXT") {
+      } else if(type=="THINK"||type=="RESPONSE"||type=="TEXT"||type=="REQUEST") {
        if(page.Length<MaxText)page.Append(role).Append(type=="THINK"?"（页面公开的思考片段，不是最终结论）":"").Append("：\n").Append(Cut(MiniJson.GetString(fragment,"content"),MaxText-page.Length)).Append("\n\n");
       }
      }
@@ -154,12 +154,17 @@ namespace ElymsPet {
   }
   public static string Evidence(WebOutcome outcome,int budget) {
    var text=new StringBuilder(outcome.AttachmentStatus+"\n");
-   text.Append(Cut(outcome.PageText,Math.Min(3000,budget/4))).Append("\n");
+   int needed=outcome.PageText.Length+text.Length+1;foreach(var a in outcome.Attachments)needed+=a.Text.Length+a.Name.Length+a.SourceUrl.Length+a.Status.Length+160;
+   bool complete=needed<=budget;
+   int pageBudget=complete||outcome.Attachments.Count==0?Math.Max(0,budget-text.Length):Math.Min(outcome.PageText.Length,budget/2);
+   if(outcome.PageText.Length>pageBudget)text.Append("以下对话正文仅为节选，未展示全文：\n");
+   text.Append(Cut(outcome.PageText,pageBudget)).Append("\n");
    int per=outcome.Attachments.Count==0?0:Math.Max(0,(budget-text.Length)/outcome.Attachments.Count-400);
    foreach(var a in outcome.Attachments) {
     text.Append("\n附件：").Append(a.Name).Append(" · ").Append(a.Bytes).Append(" 字节\n状态：").Append(a.Status).Append("\n来源：").Append(a.SourceUrl).Append("\n");
-    if(a.Text.Length>per)text.Append("以下仅为正文节选，未展示全文：\n");
-    text.Append(Cut(a.Text,per)).Append("\n");
+    int limit=complete?a.Text.Length:per;
+    if(a.Text.Length>limit)text.Append("以下仅为正文节选，未展示全文：\n");
+    text.Append(Cut(a.Text,limit)).Append("\n");
    }
    return Cut(text.ToString(),budget);
   }

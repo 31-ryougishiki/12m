@@ -1,0 +1,5 @@
+Fusion Pixel 12px Proportional SC / 缝合像素字体
+Upstream: https://github.com/TakWolf/fusion-pixel-font
+Release: v2026.11.10, 12px proportional TTF archive
+File: fusion-pixel-12px-proportional-zh_hans.ttf (renamed Pixel.ttf; font itself unmodified)
+License: SIL Open Font License 1.1; included OFL.txt and upstream component notices.

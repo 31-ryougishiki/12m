@@ -1,0 +1,16 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["oss:ListObjects"],
+      "Resource": ["acs:oss:*:*:elyms-archive-test1"],
+      "Condition": {"StringLike": {"oss:Prefix": ["elyms/archives/*"]}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["oss:GetObject", "oss:PutObject"],
+      "Resource": ["acs:oss:*:*:elyms-archive-test1/elyms/archives/*"]
+    }
+  ]
+}

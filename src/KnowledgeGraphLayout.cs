@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Microsoft.Msagl.Core.Geometry.Curves;
 using Microsoft.Msagl.Core.Layout;
@@ -13,13 +13,19 @@ namespace ElymsPet {
   public double Width=640,Height=400;
  }
  public static class KnowledgeGraphLayout {
-  public const double NodeWidth=180,NodeHeight=76;
+  public const double NodeWidth=280,NodeHeight=142;
   public static KnowledgeGraphScene Calculate(KnowledgeGraphView view) {
    var scene=new KnowledgeGraphScene();if(view.Nodes.Count==0)return scene;
+   // Disconnected knowledge is a readable two-column library, not one very long horizontal row.
+   if(view.Links.Count==0){
+    var ordered=new List<ArchiveItem>(view.Nodes);ordered.Sort(delegate(ArchiveItem a,ArchiveItem b){int domain=string.Compare(a.Domain,b.Domain,StringComparison.CurrentCulture);return domain!=0?domain:string.Compare(a.Title,b.Title,StringComparison.CurrentCulture);});
+    const int columns=2;for(int i=0;i<ordered.Count;i++)scene.Nodes.Add(new GraphNodePlacement{Item=ordered[i],X=32+(i%columns)*(NodeWidth+32),Y=32+(i/columns)*(NodeHeight+28)});
+    scene.Width=64+Math.Min(columns,ordered.Count)*NodeWidth+(ordered.Count>1?32:0);scene.Height=Math.Max(400,64+((ordered.Count+columns-1)/columns)*(NodeHeight+28)-28);return scene;
+   }
    var graph=new GeometryGraph();var nodes=new Dictionary<string,Node>();
    foreach(var item in view.Nodes){var node=new Node(CurveFactory.CreateRectangle(NodeWidth,NodeHeight,new GraphPoint()));nodes[item.Id]=node;graph.Nodes.Add(node);}
-   foreach(var link in view.Links)if(nodes.ContainsKey(link.From)&&nodes.ContainsKey(link.To))graph.Edges.Add(new Edge(nodes[link.From],nodes[link.To],76,22,1){UserData=link});
-   var settings=new SugiyamaLayoutSettings{LayerSeparation=75,NodeSeparation=40};
+   foreach(var link in view.Links)if(nodes.ContainsKey(link.From)&&nodes.ContainsKey(link.To))graph.Edges.Add(new Edge(nodes[link.From],nodes[link.To],120,28,1){UserData=link});
+   var settings=new SugiyamaLayoutSettings{LayerSeparation=100,NodeSeparation=56};
    new LayeredLayout(graph,settings).Run();
    scene.Width=Math.Max(640,graph.Width+80);scene.Height=Math.Max(400,graph.Height+80);
    foreach(var item in view.Nodes){var center=nodes[item.Id].Center;scene.Nodes.Add(new GraphNodePlacement{Item=item,X=center.X-graph.Left+40-NodeWidth/2,Y=graph.Top-center.Y+40-NodeHeight/2});}

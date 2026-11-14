@@ -27,6 +27,10 @@ namespace ElymsPet {
   [DataMember] public string Assessment = "";
  }
  [DataContract] public sealed class ArchiveSlot {
+  public override string ToString(){return Name;}
+  [DataMember] public List<DomainGraph> DomainGraphs = new List<DomainGraph>();
+  [DataMember] public List<string> AppliedGraphEdits = new List<string>();
+  [DataMember] public WorkflowReview Review;
   [DataMember] public string Id = "";
   [DataMember] public string Name = "我的存档";
   [DataMember] public DateTime Created = DateTime.MinValue;
@@ -110,7 +114,7 @@ namespace ElymsPet {
     slot.QuestionIndex=Math.Max(0,Math.Min(1000,slot.QuestionIndex));
     ArchiveKnowledge.Normalize(slot);
     slot.Items=NormalizeItems(slot.Items);
-    KnowledgeGraph.Normalize(slot);
+    KnowledgeGraph.Normalize(slot);DomainKnowledge.Normalize(slot);
     slot.Turns=NormalizeTurns(slot.Turns);
     slots.Add(slot);
    }

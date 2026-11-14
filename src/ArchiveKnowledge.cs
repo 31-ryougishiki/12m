@@ -37,6 +37,7 @@ namespace ElymsPet {
    if(slot.InterviewStage!="extract"&&slot.InterviewStage!="question")slot.InterviewStage="";
    if(slot.Resources==null)slot.Resources=new List<ArchiveResource>();
    if(slot.Workflows==null)slot.Workflows=new List<ArchiveWorkflow>();
+   if(slot.Review!=null){var r=slot.Review;if(r.Units==null||r.Units.Count==0||r.Units.Count>256||r.Position<0||r.Position>r.Units.Count||string.IsNullOrEmpty(r.Title)||r.Units.Exists(delegate(WorkflowReviewUnit u){return u==null||!(u.Field=="trigger"||u.Field=="preconditions"||u.Field=="steps"||u.Field=="checks"||u.Field=="exceptions");}))slot.Review=null;else{r.PendingAnswer=r.PendingAnswer??"";foreach(var u in r.Units){u.Text=u.Text??"";u.Label=u.Label??"";}}}
    slot.Resources.RemoveAll(delegate(ArchiveResource r){return r==null||string.IsNullOrWhiteSpace(r.Title);});
    slot.Workflows.RemoveAll(delegate(ArchiveWorkflow w){return w==null||string.IsNullOrWhiteSpace(w.Title);});
    foreach(var r in slot.Resources) {
@@ -127,6 +128,7 @@ namespace ElymsPet {
    }
    string graphError;
    if(!JsonFile.Save(Path.Combine(folder,"graph.json"),KnowledgeGraph.Export(slot),folder,out graphError))throw new IOException(graphError);
+   Write(Path.Combine(folder,"GRAPH_EDIT.md"),GraphEditing.Instructions(slot));
    Write(Path.Combine(folder,"episodes.md"),ArchiveLearning.Markdown(slot));
    Write(Path.Combine(folder,"changes.md"),ArchiveLearning.History(slot));
    skill.Append("\n经验案例与结果边界见 episodes.md。案例自述不等于已验证技能，使用前匹配场景和触发条件。\n");

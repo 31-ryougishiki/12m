@@ -109,3 +109,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ```
+
+## vLLM and vLLM Ascend source excerpts
+
+RepositoryLearningExample.cs contains short unmodified source excerpts for learning, from vllm-project/vllm (c6573eed5e56fd39b01d610db04616ed9b221851) and vllm-project/vllm-ascend (fa4ce1bcd3ecc449265f380e117b3b17ebdac00c). Copyright contributors to the vLLM project; Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved. Licensed under Apache-2.0. Original file URLs are included in each learning node. License: https://www.apache.org/licenses/LICENSE-2.0 .

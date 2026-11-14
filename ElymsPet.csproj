@@ -29,9 +29,16 @@
     <Reference Include="Microsoft.Msagl"><HintPath>vendor\msagl\Microsoft.Msagl.dll</HintPath><Private>true</Private></Reference>
     <Content Include="vendor\msagl\LICENSE.txt"><Link>MSAGL-LICENSE.txt</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
     <Compile Include="src\**\*.cs" />
+    <Content Include="vendor\pixel-font\*"><Link>fonts\%(Filename)%(Extension)</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
     <EmbeddedResource Include="assets\sprites.png"><LogicalName>sprites.png</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="assets\pet.ico"><LogicalName>pet.ico</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="assets\persona\elyms.txt"><LogicalName>elyms-persona.txt</LogicalName></EmbeddedResource>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="plugins\**\*.cs" />
+  </ItemGroup>
+  <Target Name="BuildOfficialPlugins" AfterTargets="Build">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\build.ps1&quot; -Out &quot;$(TargetPath)&quot;" />
+  </Target>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

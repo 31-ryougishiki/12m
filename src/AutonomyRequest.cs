@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace ElymsPet {
  /// <summary>规划开始时捕获的输入，后台线程不会读取正在被设置界面修改的状态。</summary>
@@ -11,6 +11,6 @@ namespace ElymsPet {
    State=state.Snapshot();Key=key;Profile=profile;Recent=recent;Last=last;
    DshContext=dshContext;WebContext=webContext;Now=now;
   }
-  public bool DshAllowed {get{return State.DshEnabled&&State.AutoLifeDsh&&State.DshAutoRun;}}
+  public bool DshAllowed {get{return PluginAccess.Enabled(State,"dsh")&&State.DshEnabled&&State.AutoLifeDsh&&State.DshAutoRun;}}
  }
 }

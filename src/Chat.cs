@@ -24,6 +24,8 @@ namespace ElymsPet {
   public int PromptTokens, CompletionTokens;
   public string Model = "", FinishReason = "";
   public bool Truncated;
+  public bool ResponseClipped;
+  public int ResponseChars;
   public bool HasReasoning;
   public int ReasoningTokens;
   public static ChatOutcome Fail(string error,string detail,int status,double seconds) {
@@ -60,14 +62,14 @@ namespace ElymsPet {
   public static ChatOutcome Complete(string apiKey,string baseUrl,string model,bool thinking,ChatTurn[] turns,int timeoutSeconds) {
    return Complete(apiKey,baseUrl,model,thinking,turns,timeoutSeconds,thinking?2048:600,DefaultTemperature);
   }
-  public static ChatOutcome Complete(string apiKey,string baseUrl,string model,bool thinking,ChatTurn[] turns,int timeoutSeconds,int maxTokens,double temperature,string reasoningEffort="low",int maxResponseChars=4000) {
+  public static ChatOutcome Complete(string apiKey,string baseUrl,string model,bool thinking,ChatTurn[] turns,int timeoutSeconds,int maxTokens,double temperature,string reasoningEffort="low",int maxResponseChars=4000,Action<string> onPartial=null) {
    var watch=Stopwatch.StartNew();
    string key=ApiKey.Clean(apiKey);
    if(!ApiKey.Valid(key)) return ChatOutcome.Fail("还没有配置 API Key。打开「设置」填入密钥，就能开始在线对话。","missing key",0,0);
    if(turns==null||turns.Length==0) return ChatOutcome.Fail("没有可发送的内容。","empty request",0,0);
    if(!ValidBaseUrl(baseUrl)) return ChatOutcome.Fail("接口地址不完整，请检查「接口地址」。","invalid base url",0,0);
    string json;
-   try {json=Serialize(BuildRequest(model,thinking,maxTokens,temperature,turns,reasoningEffort));}
+   try {var wire=BuildRequest(model,thinking,maxTokens,temperature,turns,reasoningEffort);wire.stream=onPartial!=null;if(wire.stream)wire.stream_options=new StreamOptions{include_usage=true};json=Serialize(wire);}
    catch(Exception e) {return ChatOutcome.Fail("准备对话内容时出错了。","serialize: "+e.Message,0,watch.Elapsed.TotalSeconds);}
    try {
     HttpWebRequest request=CreateRequest(Endpoint(baseUrl),key,timeoutSeconds);
@@ -75,7 +77,7 @@ namespace ElymsPet {
     request.ContentLength=payload.Length;
     using(Stream stream=request.GetRequestStream()) stream.Write(payload,0,payload.Length);
     using(HttpWebResponse response=(HttpWebResponse)request.GetResponse()) {
-     ChatOutcome outcome=ParseResponse(ReadBody(response),watch.Elapsed.TotalSeconds,maxResponseChars);
+     ChatOutcome outcome=onPartial==null?ParseResponse(ReadBody(response),watch.Elapsed.TotalSeconds,maxResponseChars):ReadStream(response,watch,maxResponseChars,onPartial);
      if(outcome.Ok) outcome.Status=(int)response.StatusCode;
      else {outcome.Detail=Redact(outcome.Detail,key);outcome.Status=outcome.Status==0?(int)response.StatusCode:outcome.Status;LogFailure(outcome);}
      return outcome;
@@ -90,10 +92,28 @@ namespace ElymsPet {
     return outcome;
    }
   }
+  static ChatOutcome ReadStream(HttpWebResponse response,Stopwatch watch,int maxChars,Action<string> partial) {
+   var text=new StringBuilder();string finish=null,model="";ChatUsage usage=null;bool done=false,reasoning=false;long lastUpdate=0;
+   using(var reader=new StreamReader(response.GetResponseStream(),Encoding.UTF8)) {
+    string line;while((line=reader.ReadLine())!=null) {
+     if(!line.StartsWith("data:",StringComparison.Ordinal))continue;
+     string payload=line.Substring(5).Trim();if(payload=="[DONE]"){done=true;break;}if(payload.Length==0)continue;
+     var chunk=Deserialize<StreamChunk>(payload);if(chunk==null)continue;
+     if(chunk.error!=null)throw new IOException("流式响应返回错误。");
+     if(chunk.model!=null)model=chunk.model;if(chunk.usage!=null)usage=chunk.usage;
+     if(chunk.choices!=null)foreach(var choice in chunk.choices){if(choice.finish_reason!=null)finish=choice.finish_reason;if(choice.delta!=null){text.Append(choice.delta.content);reasoning|=!string.IsNullOrEmpty(choice.delta.reasoning_content);}}
+     if(text.Length>1024*1024)throw new IOException("流式响应超过上限。");
+     if(watch.ElapsedMilliseconds-lastUpdate>=100){partial(text.ToString());lastUpdate=watch.ElapsedMilliseconds;}
+    }
+   }
+   if(!done||string.IsNullOrEmpty(finish))return ChatOutcome.Fail("回复中断，请重新编辑上一条后重试。","incomplete stream",0,watch.Elapsed.TotalSeconds);
+   partial(text.ToString());
+   var result=ParseResponse(Serialize(new ChatResponse{model=model,usage=usage,choices=new[]{new ChatChoice{finish_reason=finish,message=new ChatResponseMessage{content=text.ToString()}}}}),watch.Elapsed.TotalSeconds,maxChars);result.HasReasoning=reasoning;return result;
+  }
   static ChatRequest BuildRequest(string model,bool thinking,int maxTokens,double temperature,ChatTurn[] turns,string reasoningEffort) {
    var request=new ChatRequest();
    request.model=string.IsNullOrWhiteSpace(model)?DefaultModel:model.Trim();
-   request.max_tokens=Math.Max(32,Math.Min(16384,maxTokens));
+   request.max_tokens=Math.Max(32,Math.Min(65536,maxTokens));
    request.temperature=Math.Max(0,Math.Min(2,temperature));
    request.thinking=new ThinkingOption();
    if(thinking) {request.thinking.type="enabled";request.reasoning_effort=reasoningEffort=="high"?"high":"low";}
@@ -109,6 +129,7 @@ namespace ElymsPet {
   }
   static HttpWebRequest CreateRequest(string url,string key,int timeoutSeconds) {
    var request=(HttpWebRequest)WebRequest.Create(url);
+   NetworkCancellation.Track(request);
    request.Method="POST";
    request.ContentType="application/json; charset=utf-8";
    request.Accept="application/json";
@@ -168,10 +189,12 @@ namespace ElymsPet {
     return ChatOutcome.Fail("这次没有收到文字回复，再试一次？","empty content, finish="+finish,200,seconds);
    }
    content=content.Trim();
-   int limit=Math.Max(4000,Math.Min(24000,maxResponseChars));
+   int responseChars=content.Length;
+   int limit=Math.Max(4000,Math.Min(262144,maxResponseChars));
    bool clipped=content.Length>limit;
    if(clipped) content=content.Substring(0,limit)+"…";
    var outcome=new ChatOutcome {Ok=true,Text=content,Status=200,Seconds=seconds,Model=response.model??"",FinishReason=finish??"",Truncated=finish=="length"||clipped};
+   outcome.ResponseClipped=clipped;outcome.ResponseChars=responseChars;
    outcome.HasReasoning=!string.IsNullOrWhiteSpace(response.choices[0].message.reasoning_content);
    if(response.usage!=null) {outcome.PromptTokens=response.usage.prompt_tokens;outcome.CompletionTokens=response.usage.completion_tokens;if(response.usage.completion_tokens_details!=null)outcome.ReasoningTokens=response.usage.completion_tokens_details.reasoning_tokens;}
    return outcome;
@@ -218,7 +241,12 @@ namespace ElymsPet {
  [DataContract] sealed class ThinkingOption {
   [DataMember(Order=0)] public string type;
  }
+ [DataContract] sealed class StreamOptions {[DataMember] public bool include_usage;}
+ [DataContract] sealed class StreamChunk {[DataMember] public string model;[DataMember] public StreamChoice[] choices;[DataMember] public ChatUsage usage;[DataMember] public ChatError error;}
+ [DataContract] sealed class StreamChoice {[DataMember] public ChatResponseMessage delta;[DataMember] public string finish_reason;}
  [DataContract] sealed class ChatRequest {
+  [DataMember(EmitDefaultValue=false)] public bool stream;
+  [DataMember(EmitDefaultValue=false)] public StreamOptions stream_options;
   [DataMember(Order=0)] public string model;
   [DataMember(Order=1)] public WireMessage[] messages;
   [DataMember(Order=2)] public int max_tokens;

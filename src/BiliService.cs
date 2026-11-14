@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
@@ -33,6 +33,7 @@ namespace ElymsPet {
    }
   }
   public bool Browse(string query,bool fromChat) {
+   if(!PluginAccess.Enabled(settings,"bili")){Current=new BiliBrowseResult{Error="请先安装并启用 B站插件。"};Raise();return false;}
    if(work.IsDisposed||Busy) return false;
    this.fromChat=fromChat;
    Busy=true;Current=null;Raise();
@@ -53,6 +54,7 @@ namespace ElymsPet {
    return true;
   }
   public void DraftComment(BiliVideo video,Action<string> done) {
+   if(!PluginAccess.Enabled(settings,"bili")){if(done!=null)done("请先安装 B站插件。");return;}
    string key=ApiKey.Resolve(settings).Key;
    string baseUrl=settings.ApiBase,model=settings.ApiModel;
    string digest=profileDigest();
@@ -65,6 +67,7 @@ namespace ElymsPet {
    },delegate(string text) {if(done!=null)done(text);},delegate(string error) {if(done!=null)done("");});
   }
   public void SendComment(BiliVideo video,string text,Action<BiliCommentResult> done) {
+   if(!PluginAccess.Enabled(settings,"bili")){if(done!=null)done(new BiliCommentResult{Error="请先安装 B站插件。"});return;}
    string csrf=BiliApi.CsrfToken();
    work.Run(delegate {
     try {return BiliApi.PostComment(video,text,csrf,25);}
@@ -73,6 +76,7 @@ namespace ElymsPet {
    },delegate(BiliCommentResult result) {if(done!=null)done(result);},delegate(string error) {if(done!=null)done(new BiliCommentResult {Error=error});});
   }
   public void DeleteComment(BiliVideo video,long rpid,Action<BiliCommentResult> done) {
+   if(!PluginAccess.Enabled(settings,"bili")){if(done!=null)done(new BiliCommentResult{Error="请先安装 B站插件。"});return;}
    string csrf=BiliApi.CsrfToken();
    work.Run(delegate {
     try {return BiliApi.DeleteComment(video,rpid,csrf,25);}

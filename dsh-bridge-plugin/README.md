@@ -9,9 +9,11 @@
 1. 插件在 `127.0.0.1` 随机端口启动一个只接受本机请求的 HTTP 服务。
 2. 把端口与随机 token 写入 `%LOCALAPPDATA%/ElymsDesktopPet/dsh-bridge.json`。
 3. 桌宠读取握手文件，用 `Authorization: Bearer <token>` 调用。
-4. `POST /task` 通过 `ctx.agents.create` 创建真实 agent，设置 cwd 与模型，再用 `/permission` 设置权限，`agent.followup` 发送包装后的任务。
+4. `POST /task` 通过 `ctx.agents.create` 创建真实 agent，设置 cwd、模型并挂载 `standard` 预设（新版 Web 的文件与命令工具在预设中），再用 `/permission` 设置权限，`agent.followup` 发送包装后的任务。
 5. 等 `agent.whenIdle()` 结束后，从 `ctx.sessions.get(sessionId).deriveMessages()` 取最后一条 assistant 文本。
 6. 任务提示词明确要求 agent：不要打开 GUI 窗口、不要控制鼠标键盘、不要读取或输出密钥。
+7. 可选 `knowledge: {archive, root, files: [{label, path}]}` 传递当前存档派生文件的绝对路径。只接受约定的流程、图谱、背景、案例和资料索引文件；内容作为参考，草稿不可直接执行。不会自动扩大权限。
+8. 带认证的 `GET /open` 返回 DSH 官方 `connection.authenticatedUrl()` 生成的本机浏览器入口，供桌宠打开新版 DSH；不得将该 URL 放入任务或日志。
 
 ## 安装到 web profile
 
@@ -59,6 +61,8 @@ DSH 的 HMR 会热加载这个新 entry。它不会启动桌宠；桌宠的自�
 ```
 
 `permission` 可为 `read-only` / `workspace-write` / `danger-full-access`，默认由 profile 配置决定。`cwd` 默认使用配置的 workspace；不在 workspace 内会被拒绝，除非配置 `allowAnyCwd: true`。
+
+图谱代码问答使用独立的 `DSH_READ` 流程，宿主固定发送 `read-only`，自动等待 DSH 阅读本地源码并返回结论、文件位置和工具次数，再整理成聊天回答。只读任务的桥接提示词不会要求修改、创建文件或输出修改总结；不会沿用一般写入任务的权限选项。
 
 查询结果：
 

@@ -1,10 +1,12 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Runtime.Serialization;
 
 namespace ElymsPet {
  [DataContract] public sealed class PetState {
+  [IgnoreDataMember] public PluginManager Plugins;
   [DataMember] public double Scale = 1;
+  [DataMember] public double ReadingScale = 1;
   [DataMember] public double X = -99999;
   [DataMember] public double Y = -99999;
   [DataMember] public bool Topmost = true;
@@ -23,6 +25,7 @@ namespace ElymsPet {
   [DataMember] public double PausedSeconds = 0;
   [DataMember] public int FocusMinutes = 25;
   [DataMember] public string ApiKey = "";
+  [DataMember(EmitDefaultValue=false)] public string ProtectedApiKey;
   [DataMember] public string ApiBase = "https://api.deepseek.com";
   [DataMember] public string ApiModel = "deepseek-flash";
   [DataMember] public bool AiChat = true;
@@ -31,6 +34,8 @@ namespace ElymsPet {
   [DataMember] public double ChatBarY = -99999;
   [DataMember] public bool ChatBarHistory = true;
   [DataMember] public bool ChatBarAutoHide = false;
+  [DataMember] public string RadialPages = RadialMenuLayout.DefaultPages;
+   [DataMember] public bool DomainGraphEntryAdded;
   [DataMember] public bool DshEnabled = true;
   [DataMember] public bool DshAutoRun = false;
   [DataMember] public bool DshFullAccess = false;
@@ -43,6 +48,9 @@ namespace ElymsPet {
   [DataMember] public int Schema = 8;
   public PetState Snapshot() { return (PetState)MemberwiseClone(); }
   public void Normalize() {
+   ReadingScale=ReadingZoom.Normalize(ReadingScale);
+    if(!DomainGraphEntryAdded){RadialPages=RadialMenuLayout.Toggle(RadialPages,PanelTab.Graph,true);DomainGraphEntryAdded=true;}
+    RadialPages=RadialMenuLayout.Normalize(RadialPages);
    Scale = double.IsNaN(Scale) || double.IsInfinity(Scale) ? 1 : Math.Max(.65, Math.Min(1.6, Scale));
    Energy = double.IsNaN(Energy) ? 90 : Math.Max(0, Math.Min(100, Energy));
    if (double.IsNaN(X) || double.IsInfinity(X)) X = -99999;
@@ -86,11 +94,30 @@ namespace ElymsPet {
    PetState value=JsonFile.Load<PetState>(FilePath,out LastError);
    if(value==null) return new PetState();
    value.Normalize();
+   if(!string.IsNullOrEmpty(value.ProtectedApiKey)) {
+    try {value.ApiKey=System.Text.Encoding.UTF8.GetString(System.Security.Cryptography.ProtectedData.Unprotect(Convert.FromBase64String(value.ProtectedApiKey),null,System.Security.Cryptography.DataProtectionScope.CurrentUser));}
+    catch {LastError="本机无法解密 API Key，请重新填写。";}
+   } else if(!string.IsNullOrEmpty(value.ApiKey)) {Save(value);}
    return value;
   }
   public static bool Save(PetState state) {
    state.Normalize();
-   return JsonFile.Save(FilePath,state,Folder,out LastError);
+   var stored=state.Snapshot();
+   try {
+    stored.ProtectedApiKey=string.IsNullOrEmpty(state.ApiKey)?state.ProtectedApiKey:Convert.ToBase64String(System.Security.Cryptography.ProtectedData.Protect(System.Text.Encoding.UTF8.GetBytes(state.ApiKey),null,System.Security.Cryptography.DataProtectionScope.CurrentUser));
+    stored.ApiKey="";
+    bool saved=JsonFile.Save(FilePath,stored,Folder,out LastError);
+    if(saved) {
+     state.ProtectedApiKey=stored.ProtectedApiKey;
+     string backupError;var backup=JsonFile.Load<PetState>(FilePath+".bak",out backupError);
+     if(backup!=null&&!string.IsNullOrEmpty(backup.ApiKey)) {
+      backup.ProtectedApiKey=Convert.ToBase64String(System.Security.Cryptography.ProtectedData.Protect(System.Text.Encoding.UTF8.GetBytes(backup.ApiKey),null,System.Security.Cryptography.DataProtectionScope.CurrentUser));backup.ApiKey="";
+      if(!JsonFile.Save(FilePath+".bak",backup,Folder,out LastError))return false;
+      try{File.Delete(FilePath+".bak.bak");}catch(IOException){LastError="旧密钥备份清理失败。";return false;}catch(UnauthorizedAccessException){LastError="旧密钥备份清理失败。";return false;}
+     }
+    }
+    return saved;
+   } catch(System.Security.Cryptography.CryptographicException) {LastError="API Key 加密失败，设置未保存。";return false;}
   }
   public static void ForgetBackups() {
    string[] paths=new string[]{FilePath+".bak",FilePath+".tmp"};

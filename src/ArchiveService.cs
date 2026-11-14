@@ -1,33 +1,37 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 
 namespace ElymsPet {
  /// <summary>存档单元的共享逻辑：陪伴面板和浮动输入框读写同一份存档，访谈与整理只在这里跑一份。</summary>
- public sealed class ArchiveService : IDisposable {
+ public sealed partial class ArchiveService : IDisposable {
   readonly PetState state;
   readonly bool preview;
   readonly PetFeedback feedback;
   readonly WorkScope work;
+  readonly IWorkScheduler sourceScheduler;
   readonly IRepository<ArchiveBook> repository;
   readonly IArchiveApi api;
   public string Digest {get;private set;}
-  readonly ArchiveBook book;
+  ArchiveBook book;
   ArchiveSlot slot;
   bool busy;
   string status="",notice="",busyTitle="";
   string pendingAnswer="";
   int turnRevision,profileRevision,slotRevision;
   public event Action Changed;
-  public ArchiveService(PetState state,IWorkScheduler scheduler,PetFeedback feedback,IRepository<ArchiveBook> repository,bool preview,IArchiveApi api=null) {
+  public ArchiveService(PetState state,IWorkScheduler scheduler,PetFeedback feedback,IRepository<ArchiveBook> repository,bool preview,IArchiveApi api=null,IArchiveCloudClient cloudApi=null) {
    this.api=api??new ArchiveApi();
+   sourceScheduler=scheduler;
    this.preview=preview;this.state=state;this.feedback=feedback;this.repository=repository;
-   work=new WorkScope(scheduler,delegate(string error) {busy=false;busyTitle="";status=error+" 原话已保留，点「恢复上次聊天」重试当前阶段。";Raise();},!preview);
+   work=new WorkScope(scheduler,delegate(string error) {busy=false;busyTitle="";status=error+" 原话已保留，点「继续 / 重试」重试当前阶段。";Raise();},!preview);
    book=ArchiveStore.Normalize(repository.Load());
    slot=ArchiveStore.Active(book);
-   status=slot!=null&&slot.Turns.Count==0?"还没有访谈记录。点「提问」开始，或者直接回答她的问题。":"准备好继续上次的访谈。";
+   status=slot!=null&&slot.Turns.Count==0?"填写流程名逐项补充，或填写主题后点「聊新主题」。":"准备好继续上次的访谈。";
    UpdateDigest();
    Save();
+   InitializeCloud(scheduler,cloudApi);
+   InitializeGraphEditing();
   }
   public ArchiveBook Book {get {return book;}}
   public ArchiveSlot Slot {get {return slot;}}
@@ -35,7 +39,7 @@ namespace ElymsPet {
   public string BusyTitle {get {return busyTitle;}}
   public string Status {get {return status;}}
   public string Notice {get {return notice;}}
-  public bool HasQuestion {get {return HasPendingAsk();}}
+  public bool HasQuestion {get {return ReviewingWorkflow?!ReviewWaiting:HasPendingAsk();}}
   public bool CanAsk {get {return HasApi();}}
   public string ResumeSummary {get {return ArchiveResearch.ResumeSummary(slot);}}
   public string ResearchStatus {get {return "整理与追问：深度思考已开启 · "+(state.WebEnabled?"联网查证已开启":"联网查证已关闭（可在设置中开启）");}}
@@ -46,6 +50,7 @@ namespace ElymsPet {
   public int SlotRevision {get {return slotRevision;}}
   public string LatestQuestion {
    get {
+    if(ReviewingWorkflow)return ReviewQuestion;
     if(slot==null||slot.Turns.Count==0)return "";
     ArchiveTurn last=slot.Turns[slot.Turns.Count-1];
     return last.Role=="ask"?last.Text:"";
@@ -108,18 +113,23 @@ namespace ElymsPet {
    Save();turnRevision++;Raise();
   }
   public void EnsureQuestion() {
+   if(!PluginAccess.Enabled(state,"archive")){Notify("请先安装并启用存档单元插件。");return;}
    if(slot==null||busy) return;
    if(HasPendingAsk()||slot.Paused) return;
    ResumeInterview();
   }
   public void ResumeInterview() {
+   if(!PluginAccess.Enabled(state,"archive")){Notify("请先安装并启用存档单元插件。");return;}
    if(slot==null||busy||work.IsDisposed)return;
+   if(ReviewingWorkflow){ResumeWorkflowReview();return;}
    slot.Paused=false;
    if(!Save())return;
    if(HasPendingAsk()){status="已恢复上次聊天，保留原来的问题。回答后会按当前联网设置继续查证和追问。";Raise();return;}
    if(slot.Turns.Count>0&&slot.InterviewStage!="question")ExtractRecent(true);else AskNext();
   }
   public void AskNext() {
+   if(!PluginAccess.Enabled(state,"archive")){Notify("请先安装并启用存档单元插件。");return;}
+   if(ReviewingWorkflow){if(!busy)ResumeWorkflowReview();return;}
    if(slot==null||busy||work.IsDisposed) return;
    slot.Paused=false;
    if(HasPendingAsk()) {Save();status="上一条问题还没有回答。可以继续回答，也可以跳过或切换主题。";Raise();return;}
@@ -144,13 +154,13 @@ namespace ElymsPet {
    busyTitle="";
    if(slot==null) {Raise();return;}
    if(outcome==null||!outcome.Ok) {
-    status="出题没有成功："+(outcome==null?"没有接通。":outcome.Error)+" 原话与整理结果已保留，点「恢复上次聊天」只重试提问。";
+    status="出题没有成功："+(outcome==null?"没有接通。":outcome.Error)+" 原话与整理结果已保留，点「继续 / 重试」只重试提问。";
     Save();Raise();return;
    }
    if(outcome.Truncated){status="思考或追问输出未完整结束，请重试；当前访谈和已取回资料已保留。";Save();Raise();return;}
    string question=ArchiveInterview.CleanQuestion(outcome.Text);
    var assessment=ArchiveAssessment.Parse(outcome.Text);
-   if(question.Length==0||assessment==null) {status="这次没有生成完整的协助判断，点「恢复上次聊天」重试。";Save();Raise();return;}
+   if(question.Length==0||assessment==null) {status="这次没有生成完整的协助判断，点「继续 / 重试」重试。";Save();Raise();return;}
    ArchiveStore.AddTurn(slot,"ask",question);
    slot.InterviewStage="";
    slot.Turns[slot.Turns.Count-1].Sources=sources;
@@ -160,7 +170,9 @@ namespace ElymsPet {
    Save();turnRevision++;Raise();
   }
   public bool Answer(string raw) {
+   if(!PluginAccess.Enabled(state,"archive")){Notify("请先安装并启用存档单元插件。");return false;}
    if(slot==null||busy||work.IsDisposed) return false;
+   if(ReviewingWorkflow)return AnswerWorkflowUnit(raw);
    string text=(raw==null?"":raw).Trim();
    if(text.Length==0) return false;
    if(slot.Paused){Notify("访谈已暂停，请先继续访谈。");return false;}
@@ -186,6 +198,7 @@ namespace ElymsPet {
    return true;
   }
   public void ExtractRecent(bool resume=false) {
+   if(!PluginAccess.Enabled(state,"archive")){Notify("请先安装并启用存档单元插件。");return;}
    if(slot==null||busy||work.IsDisposed) return;
    if(slot.Turns.Count==0) {status="还没有访谈内容可以整理。";Raise();return;}
    if(!HasApi()) {status="离线模式只能逐条记录；接入 API 后可以把访谈重新整理成条目。";Raise();return;}
@@ -231,7 +244,7 @@ namespace ElymsPet {
   void FinishExtract(ChatOutcome outcome,bool resume=false) {
    busy=false;busyTitle="";
    if(slot==null) {Raise();return;}
-   if(outcome==null||!outcome.Ok) {status="整理没有成功："+(outcome==null?"没有接通。":outcome.Error)+" 原话已保留，点「恢复上次聊天」重试。";Raise();return;}
+   if(outcome==null||!outcome.Ok) {status="整理没有成功："+(outcome==null?"没有接通。":outcome.Error)+" 原话已保留，点「继续 / 重试」重试。";Raise();return;}
    if(outcome.Truncated){status="思考或整理输出未完整结束，原记录已保留，请重试整理。";Raise();return;}
    InterviewResult result=ArchiveInterview.Parse(outcome.Text);
    if(!result.Structured) {status="这批内容没能整理成条目，稍后再试一次。";Raise();return;}
@@ -252,7 +265,7 @@ namespace ElymsPet {
   void OfflineInterview(string answer,string hint) {
    busy=false;busyTitle="";
    if(slot==null) {Raise();return;}
-   status=hint+" 回答已保存在本地，点「恢复上次聊天」重试整理并继续提问；暂不推断掌握程度。";
+   status=hint+" 回答已保存在本地，点「继续 / 重试」重试整理并继续提问；暂不推断掌握程度。";
    notice="原话已保留，等待整理。";Save();turnRevision++;Raise();
   }
   public bool SaveKnowledgeNode(string id,string title,string domain,string boundary,string level,string evidence,string note) {
@@ -316,7 +329,10 @@ namespace ElymsPet {
    if(busy||slot==null)return;slot.Paused=true;status="访谈已暂停，已整理的内容会保留。";Save();Raise();
   }
   public void Focus(string topic) {
+   if(!PluginAccess.Enabled(state,"archive")){Notify("请先安装并启用存档单元插件。");return;}
    if(busy||slot==null)return;
+   if(ReviewWaiting){Notify("请先完成待整理的流程补充，或结束本轮。");return;}
+   slot.Review=null;
    slot.Focus=ArchiveStore.Clip(ArchiveStore.Clean(topic),100);slot.Paused=false;
    slot.InterviewGoal=slot.Focus;
    if(HasPendingAsk())ArchiveStore.AddTurn(slot,"answer","先跳过这个问题，接下来聚焦："+slot.Focus);
@@ -376,7 +392,7 @@ namespace ElymsPet {
   }
   void TouchAll() {slotRevision++;turnRevision++;profileRevision++;UpdateDigest();Raise();}
   void UpdateDigest() {Digest=slot==null?"":ArchiveStore.Digest(slot,40,16000);}
-  public void Dispose() {work.Dispose();busy=false;}
+  public void Dispose() {if(graphEditTimer!=null)graphEditTimer.Stop();if(cloudTimer!=null)cloudTimer.Stop();if(cloudWork!=null)cloudWork.Dispose();work.Dispose();busy=false;}
   void Raise() {if(Changed!=null) Changed();}
  }
 }

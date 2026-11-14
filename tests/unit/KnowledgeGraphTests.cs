@@ -50,6 +50,7 @@ namespace ElymsPet {
     }
     var many=ArchiveStore.NewSlot("large");for(int i=0;i<100;i++)ArchiveStore.Merge(many,new[]{new ArchiveItem{Title="知识"+i,Domain="测试"}});
     var snapshot=KnowledgeGraph.Filter(many,"","","","",80);var large=KnowledgeGraphLayout.Calculate(snapshot);
+    Check(large.Width<750&&large.Nodes[2].Y>large.Nodes[0].Y,"unlinked knowledge wraps into readable rows instead of a horizontal strip");
     Check(snapshot.MatchingCount==100&&large.Nodes.Count==80,"bounded layout supports large archives without deleting knowledge");
     Check(ArchiveInterview.BuildSystem(slot).Contains("links=")&&ArchiveInterview.BuildExtract(slot)[0].Content.Contains("links="),"both extraction paths provide relationship schema");
     Console.WriteLine("PASS graph: "+checks+" checks");

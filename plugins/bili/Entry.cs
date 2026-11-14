@@ -1,0 +1,2 @@
+﻿using System;
+namespace ElymsPet.Plugins.bili { public sealed class Entry:IOfficialPlugin { public PluginPage Create(PetWindow pet,Action<PanelTab> navigate){var panel=new BiliPanel(pet);return new PluginPage{Root=panel.Root,Refresh=panel.RefreshTab,Close=panel.Dispose};} } }

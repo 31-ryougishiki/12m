@@ -1,0 +1,2 @@
+﻿using System;
+namespace ElymsPet.Plugins.archive { public sealed class Entry:IOfficialPlugin { public PluginPage Create(PetWindow pet,Action<PanelTab> navigate){var panel=new ArchivePanel(pet,navigate);return new PluginPage{Root=panel.Root,Save=panel.Save,Close=panel.Dispose,StartTopic=panel.StartGraphTopic};} } }

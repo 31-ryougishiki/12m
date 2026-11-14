@@ -1,0 +1,2 @@
+﻿using System;
+namespace ElymsPet.Plugins.cloud { public sealed class Entry:IOfficialPlugin { public PluginPage Create(PetWindow pet,Action<PanelTab> navigate){var panel=new ArchiveCloudPanel(pet.Archive);return new PluginPage{Root=panel.Root,Close=panel.Dispose};} } }

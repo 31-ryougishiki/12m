@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -25,7 +25,7 @@ namespace ElymsPet {
    WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=Brushes.Transparent;ResizeMode=ResizeMode.NoResize;
    ShowInTaskbar=false;WindowStartupLocation=WindowStartupLocation.CenterScreen;FontFamily=Theme.Font;UseLayoutRounding=true;
    var body=new DockPanel{Margin=new Thickness(22)};
-   Content=new Border{Background=Theme.Surface,BorderBrush=Theme.Brush("#DEC0C5"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(16),Child=body};
+   Content=new Border{Background=Theme.Surface,BorderBrush=Theme.Brush("#DEC0C5"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(0),Child=body};
    var head=new DockPanel{Margin=new Thickness(0,0,0,18)};DockPanel.SetDock(head,Dock.Top);body.Children.Add(head);
    var close=Ui.Button("×",delegate {Close();},false);close.Width=32;close.Height=32;close.Padding=new Thickness(0);close.Margin=new Thickness(12,0,0,0);close.ToolTip="关闭";System.Windows.Automation.AutomationProperties.SetName(close,"关闭对话框");DockPanel.SetDock(close,Dock.Right);head.Children.Add(close);
    var titleText=new TextBlock{Text=title,FontSize=18,FontWeight=FontWeights.SemiBold,Foreground=Theme.TextMain,TextWrapping=TextWrapping.Wrap,VerticalAlignment=VerticalAlignment.Center};head.Children.Add(titleText);
@@ -72,3 +72,4 @@ namespace ElymsPet {
   public override Drawing.Color SeparatorLight {get{return Surface;}}
  }
 }
+

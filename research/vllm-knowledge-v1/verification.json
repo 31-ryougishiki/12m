@@ -1,0 +1,303 @@
+{
+  "Checks": [
+    {
+      "Id": "entry-async-llm",
+      "ValidPinnedLocations": 4,
+      "VerbatimCodeLinesMatched": 2
+    },
+    {
+      "Id": "entry-output-loop",
+      "ValidPinnedLocations": 4,
+      "VerbatimCodeLinesMatched": 5
+    },
+    {
+      "Id": "engine-core-step",
+      "ValidPinnedLocations": 4,
+      "VerbatimCodeLinesMatched": 7
+    },
+    {
+      "Id": "engine-core-kv-init",
+      "ValidPinnedLocations": 6,
+      "VerbatimCodeLinesMatched": 2
+    },
+    {
+      "Id": "scheduler-schedule",
+      "ValidPinnedLocations": 4,
+      "VerbatimCodeLinesMatched": 2
+    },
+    {
+      "Id": "scheduler-preempt",
+      "ValidPinnedLocations": 4,
+      "VerbatimCodeLinesMatched": 11
+    },
+    {
+      "Id": "kv-block-alloc",
+      "ValidPinnedLocations": 4,
+      "VerbatimCodeLinesMatched": 13
+    },
+    {
+      "Id": "kv-prefix-cache",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 5
+    },
+    {
+      "Id": "model-runner-execute",
+      "ValidPinnedLocations": 6,
+      "VerbatimCodeLinesMatched": 11
+    },
+    {
+      "Id": "model-runner-load",
+      "ValidPinnedLocations": 1,
+      "VerbatimCodeLinesMatched": 15
+    },
+    {
+      "Id": "worker-gpu",
+      "ValidPinnedLocations": 5,
+      "VerbatimCodeLinesMatched": 4
+    },
+    {
+      "Id": "executor-boundary",
+      "ValidPinnedLocations": 4,
+      "VerbatimCodeLinesMatched": 7
+    },
+    {
+      "Id": "platform-interface",
+      "ValidPinnedLocations": 6,
+      "VerbatimCodeLinesMatched": 6
+    },
+    {
+      "Id": "platform-npu",
+      "ValidPinnedLocations": 6,
+      "VerbatimCodeLinesMatched": 11
+    },
+    {
+      "Id": "attn-backend-select",
+      "ValidPinnedLocations": 3,
+      "VerbatimCodeLinesMatched": 13
+    },
+    {
+      "Id": "worker-npu",
+      "ValidPinnedLocations": 6,
+      "VerbatimCodeLinesMatched": 5
+    },
+    {
+      "Id": "hccl-parallel",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 12
+    },
+    {
+      "Id": "aclgraph-integration",
+      "ValidPinnedLocations": 7,
+      "VerbatimCodeLinesMatched": 5
+    },
+    {
+      "Id": "compile-backend",
+      "ValidPinnedLocations": 5,
+      "VerbatimCodeLinesMatched": 20
+    },
+    {
+      "Id": "ascend-scheduler-cls",
+      "ValidPinnedLocations": 6,
+      "VerbatimCodeLinesMatched": 9
+    },
+    {
+      "Id": "kv-config-builder",
+      "ValidPinnedLocations": 4,
+      "VerbatimCodeLinesMatched": 15
+    },
+    {
+      "Id": "patch-layer",
+      "ValidPinnedLocations": 6,
+      "VerbatimCodeLinesMatched": 0
+    },
+    {
+      "Id": "legacy-310p",
+      "ValidPinnedLocations": 4,
+      "VerbatimCodeLinesMatched": 3
+    },
+    {
+      "Id": "model-registry",
+      "ValidPinnedLocations": 5,
+      "VerbatimCodeLinesMatched": 5
+    },
+    {
+      "Id": "model-registry-table",
+      "ValidPinnedLocations": 8,
+      "VerbatimCodeLinesMatched": 3
+    },
+    {
+      "Id": "model-impl-deepseek",
+      "ValidPinnedLocations": 7,
+      "VerbatimCodeLinesMatched": 7
+    },
+    {
+      "Id": "plugin-registration",
+      "ValidPinnedLocations": 4,
+      "VerbatimCodeLinesMatched": 5
+    },
+    {
+      "Id": "ascend-model-runner",
+      "ValidPinnedLocations": 7,
+      "VerbatimCodeLinesMatched": 22
+    },
+    {
+      "Id": "moe-comm",
+      "ValidPinnedLocations": 7,
+      "VerbatimCodeLinesMatched": 14
+    },
+    {
+      "Id": "eplb",
+      "ValidPinnedLocations": 12,
+      "VerbatimCodeLinesMatched": 32
+    },
+    {
+      "Id": "engine-core-request-struct",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 24
+    },
+    {
+      "Id": "engine-step-detail-empty",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 0
+    },
+    {
+      "Id": "engine-step-detail-schedule",
+      "ValidPinnedLocations": 3,
+      "VerbatimCodeLinesMatched": 0
+    },
+    {
+      "Id": "engine-step-detail-count",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 0
+    },
+    {
+      "Id": "engine-step-detail-dispatch",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 0
+    },
+    {
+      "Id": "engine-step-detail-grammar",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 0
+    },
+    {
+      "Id": "engine-step-detail-wait-sample",
+      "ValidPinnedLocations": 3,
+      "VerbatimCodeLinesMatched": 0
+    },
+    {
+      "Id": "engine-step-detail-aborts",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 0
+    },
+    {
+      "Id": "engine-step-detail-update",
+      "ValidPinnedLocations": 3,
+      "VerbatimCodeLinesMatched": 0
+    },
+    {
+      "Id": "engine-step-detail-attach",
+      "ValidPinnedLocations": 3,
+      "VerbatimCodeLinesMatched": 0
+    },
+    {
+      "Id": "engine-step-detail-return",
+      "ValidPinnedLocations": 3,
+      "VerbatimCodeLinesMatched": 0
+    },
+    {
+      "Id": "input-process",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 37
+    },
+    {
+      "Id": "client-ipc",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 10
+    },
+    {
+      "Id": "request-runtime",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 29
+    },
+    {
+      "Id": "request-status",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 22
+    },
+    {
+      "Id": "scheduler-output",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 12
+    },
+    {
+      "Id": "kv-prefix-lookup",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 26
+    },
+    {
+      "Id": "kv-pool-allocate",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 31
+    },
+    {
+      "Id": "kv-pool-free",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 31
+    },
+    {
+      "Id": "sample-token",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 31
+    },
+    {
+      "Id": "spec-verify",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 35
+    },
+    {
+      "Id": "output-process",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 33
+    },
+    {
+      "Id": "detokenize-stop",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 27
+    },
+    {
+      "Id": "structured-grammar",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 33
+    },
+    {
+      "Id": "ascend-attn-contract",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 26
+    },
+    {
+      "Id": "ascend-attn-metadata",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 28
+    },
+    {
+      "Id": "ascend-attn-forward",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 34
+    },
+    {
+      "Id": "ascend-mla-forward",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 29
+    },
+    {
+      "Id": "ascend-sample",
+      "ValidPinnedLocations": 2,
+      "VerbatimCodeLinesMatched": 18
+    }
+  ],
+  "NodeCount": 59,
+  "SourceFileCount": 39,
+  "Method": "git show 固定提交；检查行范围与代码原文。此自动检查不证明解释语义、运行兼容性或性能。",
+  "UnmatchedCodeLines": 0
+}

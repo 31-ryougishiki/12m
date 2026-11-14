@@ -49,7 +49,7 @@ namespace ElymsPet {
     task,
     Ui.Row(start,cancel),
     fullAccess,
-    Ui.Text("没有勾选「完整访问」时使用工作区可写权限；某些命令/工具可能需要完整访问。DSH 收到的是任务描述，不会收到 API Key。",11,"#795F69"));
+    Ui.Text("每次委托自动附带当前存档的流程、知识图谱、知识背景与资料索引路径。草稿仅供核实；不传递密钥或连接配置。未勾选完整访问时使用工作区可写权限。",12,"#795F69"));
    var current=Ui.Stack(resultLabel,currentTitle,currentMeta,result);
    var recent=Ui.Stack(Ui.Text("最近任务",18,"#4F3B43"),historyList);
    var root=new StackPanel();
@@ -72,9 +72,7 @@ namespace ElymsPet {
    }
   }
   void OpenDsh() {
-   string error;var handshake=DshApi.ReadHandshake(out error);
-   string url=handshake!=null&&!string.IsNullOrEmpty(handshake.webUrl)?handshake.webUrl:"http://127.0.0.1:3080";
-   try {Process.Start(url);} catch(Exception e) {connection.Text="打开 DSH 失败："+e.Message;}
+   connection.Text="正在获取 DSH 本机访问入口…";dsh.OpenWeb();
   }
   void OnConnection(bool ok,string text) {connection.Text=text;}
   void OnFinished(DshJob job) {

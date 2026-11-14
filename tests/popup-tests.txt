@@ -1,0 +1,3 @@
+FAIL System.Exception: Popup rendering: all 11 control-panel pages instantiate with installed theme
+   在 ElymsPet.PopupRenderingTests.Check(Boolean pass, String name)
+   在 ElymsPet.PopupRenderingTests.Run(String root)

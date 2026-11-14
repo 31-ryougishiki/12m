@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 
 namespace ElymsPet {
- public enum PanelTab { Companion, Archive, Workbench, Web, Bili, Focus, Notes, Settings, Character, Memory }
+ public enum PanelTab { Companion, Archive, Workbench, Web, Bili, Focus, Notes, Settings, Character, Memory, Graph, Plugins, Cloud }
 
  /// <summary>陪伴面板的派生显示状态。动画刷新不负责驱动这些属性。</summary>
  public sealed class CompanionStatusViewModel : INotifyPropertyChanged {

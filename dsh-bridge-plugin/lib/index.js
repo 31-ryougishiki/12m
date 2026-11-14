@@ -18,6 +18,7 @@
  */
 
 import { JobRegistry } from './job-registry.js'
+import { knowledgeManifest, knowledgePrompt } from './knowledge.js'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -44,6 +45,7 @@ const DEFAULTS = Object.freeze({
   provider: 'deepseek-official',
   model: 'deepseek-flash',
   reasoningEffort: 'high',
+  agentPreset: 'standard',
   maxActive: 1,
   maxJobs: 30,
   taskTimeoutMs: 30 * 60 * 1000,
@@ -67,6 +69,7 @@ function normalizeConfig(config) {
     provider: typeof input.provider === 'string' && input.provider.trim() !== '' ? input.provider.trim() : DEFAULTS.provider,
     model: typeof input.model === 'string' && input.model.trim() !== '' ? input.model.trim() : DEFAULTS.model,
     reasoningEffort: typeof input.reasoningEffort === 'string' && input.reasoningEffort.trim() !== '' ? input.reasoningEffort.trim() : DEFAULTS.reasoningEffort,
+    agentPreset: typeof input.agentPreset === 'string' && input.agentPreset.trim() !== '' ? input.agentPreset.trim() : DEFAULTS.agentPreset,
     maxActive: Number.isFinite(maxActive) ? Math.max(1, Math.min(4, Math.trunc(maxActive))) : DEFAULTS.maxActive,
     maxJobs: Number.isFinite(maxJobs) ? Math.max(5, Math.min(100, Math.trunc(maxJobs))) : DEFAULTS.maxJobs,
     taskTimeoutMs: Number.isFinite(timeout) ? Math.max(30_000, Math.min(2 * 60 * 60 * 1000, Math.trunc(timeout))) : DEFAULTS.taskTimeoutMs,
@@ -151,6 +154,7 @@ function insideWorkspace(workspace, cwd) {
 
 function jobView(job) {
   return {
+    knowledge: job.knowledge,
     id: job.id,
     title: job.title,
     status: job.status,
@@ -170,18 +174,19 @@ function jobView(job) {
   }
 }
 
-function wrapTask(task, workspace) {
+function wrapTask(task, workspace, knowledge, permission = 'workspace-write') {
+  const readOnly = permission === 'read-only'
   return `你是由桌面宠物「曳尔沐」转交任务的 DSH 工作台执行者。
 请直接完成下面的工作，不要反问、不要等待用户确认；缺少信息时按最合理的假设完成，并在结论里说明你的假设。
-可以使用你的文件、命令、搜索等工具实际修改、创建、运行验证；当前工作区是 ${workspace}。
+${readOnly ? '当前任务只读：使用文件读取、搜索和只读命令核实问题，不修改或创建文件，不安装依赖、不执行构建测试，不改变仓库版本。' : '可以使用你的文件、命令、搜索等工具实际修改、创建、运行验证；'}当前工作区是 ${workspace}。
 重要限制：
 1. 不要操作桌面 GUI，不要打开可见窗口，不要控制鼠标或键盘，不要截图，不要使用浏览器工具打开页面。
 2. 不要读取、输出或传播 API Key、密码、令牌等秘密。
 3. 不要运行会破坏系统或删除工作区之外文件的操作。
-完成后用简洁中文总结：改了什么、如何验证、还有什么没做或需要用户决定。
+${readOnly ? '完成后直接给出问题的结论、实际读取的文件位置和必要证据；缺少证据则说明具体原因，不输出修改总结或假装已核实。' : '完成后用简洁中文总结：改了什么、如何验证、还有什么没做或需要用户决定。'}
 
 任务：
-${task}`
+${task}${knowledgePrompt(knowledge)}`
 }
 
 function assistantText(messages) {
@@ -245,9 +250,13 @@ async function runJob(ctx, logger, job, settings) {
   try {
     const sessionId = randomUUID()
     job.sessionId = sessionId
+    // Web 0.2.2 scopes file/shell tools to presets; bare agents.create() has no standard tools.
+    const presets = ctx.get?.('agentPresets')
+    const presetId = presets ? (await presets.resolve(settings.agentPreset)).id : undefined
     const handle = await ctx.agents.create({
       sessionId,
-      meta: { cwd: job.cwd },
+      meta: { cwd: job.cwd, ...(presetId ? { agentPreset: presetId } : {}) },
+      ...(presetId ? { setup: async agentCtx => { await presets.mount(agentCtx, presetId) } } : {}),
       agentOptions: {
         provider: settings.provider,
         model: settings.model,
@@ -264,7 +273,7 @@ async function runJob(ctx, logger, job, settings) {
     agent.followup({
       id: randomUUID(),
       role: 'user',
-      content: [{ type: 'text', text: wrapTask(job.task, job.cwd) }],
+      content: [{ type: 'text', text: wrapTask(job.task, job.cwd, job.knowledge, job.permission) }],
       source: { kind: 'user' },
     })
 
@@ -423,7 +432,24 @@ export function apply(ctx, config = {}) {
           webUrl: settings.webUrl,
           active: registry.active,
           jobs: jobs.size,
+          capabilities: ['knowledge-paths', 'browser-launch'],
         })
+        return
+      }
+
+      if (req.method === 'GET' && pathname === '/open') {
+        const connection = ctx.get?.('connection')
+        if (typeof connection?.authenticatedUrl !== 'function') {
+          sendJson(res, 503, { error: 'DSH browser entry is not ready' })
+          return
+        }
+        // Browser credentials stay on the authenticated local transport, never in agent prompts or logs.
+        const url = new URL(settings.webUrl)
+        if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || !['http:', 'https:'].includes(url.protocol)) {
+          sendJson(res, 400, { error: 'browser entry must be loopback' })
+          return
+        }
+        sendJson(res, 200, { url: connection.authenticatedUrl(url.href) })
         return
       }
 
@@ -435,6 +461,7 @@ export function apply(ctx, config = {}) {
 
       if (req.method === 'POST' && pathname === '/task') {
         const body = await readJson(req)
+        const knowledge = knowledgeManifest(body.knowledge)
         const task = typeof body.prompt === 'string' ? body.prompt.trim() : ''
         if (task === '') {
           sendJson(res, 400, { error: 'prompt is required' })
@@ -464,6 +491,7 @@ export function apply(ctx, config = {}) {
           id: randomUUID(),
           title,
           task,
+          knowledge,
           cwd,
           permission,
           status: 'queued',

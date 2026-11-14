@@ -1,4 +1,4 @@
-param()
+﻿param()
 $ErrorActionPreference = 'Stop'
 & (Join-Path $PSScriptRoot 'test.ps1')
 $versionSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'src/AppVersion.cs') -Raw
@@ -7,7 +7,7 @@ $version = $Matches[1]
 $releaseRoot = Join-Path $PSScriptRoot 'artifacts/releases'
 $stage = Join-Path $releaseRoot ('ElymsPet-' + $version + '-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
-& (Join-Path $PSScriptRoot 'build.ps1') -Out (Join-Path $stage 'ElymsPet.exe') -Tests
+& (Join-Path $PSScriptRoot 'build.ps1') -Out (Join-Path $stage 'ElymsPet.exe')
 foreach ($name in @('README.md','CHANGELOG.md','THIRD_PARTY_NOTICES.md','install-dsh-plugins.ps1')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $stage
 }

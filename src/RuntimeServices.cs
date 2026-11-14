@@ -48,12 +48,13 @@ namespace ElymsPet {
   }
  }
 
- /// <summary>每个服务或面板拥有自己的任务作用域。取消使排队工作和迟到回调失效；已开始的 HTTP 请求由原超时结束。</summary>
+ /// <summary>每个服务或面板拥有自己的任务作用域。取消丢弃迟到回调，并中止已登记的 AI / Web HTTP 请求。</summary>
  public sealed class WorkScope : IDisposable {
   readonly IWorkScheduler scheduler;
   readonly Action<string> failed;
   readonly bool enabled;
   int generation;
+  CancellationTokenSource cancellation=new CancellationTokenSource();
   volatile bool disposed;
   public WorkScope(IWorkScheduler scheduler, Action<string> failed, bool enabled) {
    this.scheduler = scheduler; this.failed = failed; this.enabled = enabled;
@@ -64,12 +65,13 @@ namespace ElymsPet {
    if (disposed) return;
    if (!enabled) { failure("预览模式不执行在线任务。"); return; }
    int ticket = generation;
+   var cancellationToken=cancellation.Token;
    try {
     scheduler.Queue(delegate {
      if (!Current(ticket)) return;
      T result = default(T);
      Exception error = null;
-     try { result = work(); } catch (Exception e) { error = e; }
+     try { result = NetworkCancellation.Run(cancellationToken,work); } catch (Exception e) { error = e; }
      if (!Current(ticket)) return;
      try {
       scheduler.Post(delegate {
@@ -86,7 +88,7 @@ namespace ElymsPet {
    // Exception.Message 可能包含请求地址、密钥或正文，不直接送进界面。
    return "后台任务未完成（" + error.GetType().Name + "），请稍后重试。";
   }
-  public void CancelPending() { Interlocked.Increment(ref generation); }
+  public void CancelPending() { Interlocked.Increment(ref generation);var old=cancellation;cancellation=new CancellationTokenSource();old.Cancel(); }
   public void Dispose() { disposed = true; CancelPending(); }
  }
 

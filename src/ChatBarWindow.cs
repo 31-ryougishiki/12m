@@ -33,12 +33,12 @@ namespace ElymsPet {
    UseLayoutRounding=true;SnapsToDevicePixels=true;
    TextOptions.SetTextFormattingMode(this,TextFormattingMode.Display);
    var root=new Grid();
-   root.Children.Add(new Border{Background=new SolidColorBrush(Color.FromArgb(14,0,0,0)),CornerRadius=new CornerRadius(30),Margin=new Thickness(8)});
-   root.Children.Add(new Border{Background=new SolidColorBrush(Color.FromArgb(30,0,0,0)),CornerRadius=new CornerRadius(26),Margin=new Thickness(13)});
+   root.Children.Add(new Border{Background=new SolidColorBrush(Color.FromArgb(14,0,0,0)),CornerRadius=new CornerRadius(0),Margin=new Thickness(8)});
+   root.Children.Add(new Border{Background=new SolidColorBrush(Color.FromArgb(30,0,0,0)),CornerRadius=new CornerRadius(0),Margin=new Thickness(13)});
    var card=new Border{
-    Background=Theme.Grad("#FFFFFCF9","#FFFFF0E8",90),
+    Background=Theme.Surface,
     BorderBrush=Theme.Brush("#D9BDB6"),BorderThickness=new Thickness(1),
-    CornerRadius=new CornerRadius(22),Margin=new Thickness(18)
+    CornerRadius=new CornerRadius(0),Margin=new Thickness(18)
    };
    root.Children.Add(card);
    var body=new Grid();
@@ -49,7 +49,7 @@ namespace ElymsPet {
    header.ColumnDefinitions.Add(new ColumnDefinition());
    header.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
    var face=new Grid{Width=38,Height=38,Margin=new Thickness(0,0,11,0),VerticalAlignment=VerticalAlignment.Center,Cursor=Cursors.SizeAll};
-   var avatar=new Border{CornerRadius=new CornerRadius(19),Background=new ImageBrush(pet.Art.Face){Stretch=Stretch.UniformToFill},BorderBrush=Theme.Brush("#D5B9D6"),BorderThickness=new Thickness(1)};
+   var avatar=new Border{CornerRadius=new CornerRadius(0),Background=new ImageBrush(pet.Art.Face){Stretch=Stretch.UniformToFill},BorderBrush=Theme.Brush("#D5B9D6"),BorderThickness=new Thickness(1)};
    RenderOptions.SetBitmapScalingMode(avatar,BitmapScalingMode.HighQuality);
    face.Children.Add(avatar);
    var dot=new Ellipse{Width=9,Height=9,Fill=Theme.Success,Stroke=Theme.Brush("#FFFCF9"),StrokeThickness=1.6,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(0,0,1,1)};
@@ -72,7 +72,7 @@ namespace ElymsPet {
    tools.Children.Add(IconButton(GlyphPath(GlyphClose),"收起（Esc）",delegate {HideBar();}));
    header.Children.Add(tools);Grid.SetColumn(tools,2);
    body.Children.Add(header);Grid.SetRow(header,0);
-   var divider=new Border{Height=1,Margin=new Thickness(16,0,16,0),Background=Theme.Grad3("#00FFFFFF","#E4CCC6","#00FFFFFF")};
+   var divider=new Border{Height=1,Margin=new Thickness(16,0,16,0),Background=Theme.Line};
    body.Children.Add(divider);Grid.SetRow(divider,1);
    var toolbar=new Grid{Margin=new Thickness(16,6,12,9)};
    toolbar.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
@@ -94,8 +94,8 @@ namespace ElymsPet {
    body.Children.Add(toolbar);Grid.SetRow(toolbar,2);
    questionText=new TextBlock{FontSize=11.5,LineHeight=18,Foreground=Theme.TextSoft,TextWrapping=TextWrapping.Wrap};
    questionBanner=new Border{
-    Margin=new Thickness(14,0,14,8),Padding=new Thickness(11,7,11,8),CornerRadius=new CornerRadius(11),
-    Background=Theme.Brush("#F6EEE8"),BorderBrush=Theme.Brush("#E7D6CE"),BorderThickness=new Thickness(1),
+    Margin=new Thickness(14,0,14,8),Padding=new Thickness(11,7,11,8),CornerRadius=new CornerRadius(0),
+    Background=Theme.Brush("#EDF2FA"),BorderBrush=Theme.Brush("#8996B5"),BorderThickness=new Thickness(1),
     Child=questionText,Visibility=Visibility.Collapsed
    };
    body.Children.Add(questionBanner);Grid.SetRow(questionBanner,3);
@@ -113,8 +113,8 @@ namespace ElymsPet {
    archiveView=new ChatView(true){Margin=new Thickness(14,0,12,8),MaxHeight=268,Visibility=Visibility.Collapsed};
    body.Children.Add(archiveView);Grid.SetRow(archiveView,4);
    var inputHost=new Border{
-    Margin=new Thickness(14,0,14,0),CornerRadius=new CornerRadius(16),
-    Background=Theme.Brush("#FFFFFF"),BorderBrush=Theme.Brush("#D9BAB6"),BorderThickness=new Thickness(1),
+    Margin=new Thickness(14,0,14,0),CornerRadius=new CornerRadius(0),
+    Background=Theme.Brush("#FFFFFF"),BorderBrush=Theme.Brush("#8996B5"),BorderThickness=new Thickness(1),
     Padding=new Thickness(12,2,4,2)
    };
    var inputGrid=new Grid();
@@ -184,11 +184,11 @@ namespace ElymsPet {
   }
   Border IconButton(Path icon,string tip,Action action) {
    var button=new Border{
-    Width=26,Height=26,CornerRadius=new CornerRadius(13),Background=Brushes.Transparent,
+    Width=26,Height=26,CornerRadius=new CornerRadius(0),Background=Brushes.Transparent,
     Child=icon,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(3,0,0,0),
     Cursor=Cursors.Hand,ToolTip=tip
    };
-   button.MouseEnter+=delegate {button.Background=Theme.Brush("#F4DCE4");icon.Stroke=Theme.TextMain;};
+   button.MouseEnter+=delegate {button.Background=Theme.Brush("#E5E0FF");icon.Stroke=Theme.TextMain;};
    button.MouseLeave+=delegate {
     button.Background=Brushes.Transparent;
     icon.Stroke=icon==historyIcon&&!showHistory?Theme.Brush("#795F69"):Theme.TextSoft;
@@ -199,20 +199,20 @@ namespace ElymsPet {
   Border ModePill(string label,Action action,out TextBlock labelText) {
    labelText=new TextBlock{Text=label,FontSize=11,Foreground=Theme.TextDim};
    var pill=new Border{
-    CornerRadius=new CornerRadius(9),Padding=new Thickness(11,4,11,4),Margin=new Thickness(0,0,4,0),
+    CornerRadius=new CornerRadius(0),Padding=new Thickness(11,4,11,4),Margin=new Thickness(0,0,4,0),
     Background=Brushes.Transparent,Cursor=Cursors.Hand,Child=labelText
    };
    pill.MouseLeftButtonUp+=delegate(object sender,MouseButtonEventArgs e) {e.Handled=true;if(action!=null)action();};
-   pill.MouseEnter+=delegate {if(!PillActive(pill))pill.Background=Theme.Brush("#F4DCE4");};
+   pill.MouseEnter+=delegate {if(!PillActive(pill))pill.Background=Theme.Brush("#E5E0FF");};
    pill.MouseLeave+=delegate {if(!PillActive(pill))pill.Background=Brushes.Transparent;};
    return pill;
   }
   bool PillActive(Border pill) {return pill==chatPill?!archiveMode:archiveMode;}
   void StyleMode() {
    if(chatPill==null)return;
-   chatPill.Background=archiveMode?Brushes.Transparent:Theme.Brush("#F4DCE4");
+   chatPill.Background=archiveMode?Brushes.Transparent:Theme.Brush("#E5E0FF");
    chatLabel.Foreground=archiveMode?Theme.TextDim:Theme.Accent;
-   archivePill.Background=archiveMode?Theme.Brush("#F4DCE4"):Brushes.Transparent;
+   archivePill.Background=archiveMode?Theme.Brush("#E5E0FF"):Brushes.Transparent;
    archiveLabel.Foreground=archiveMode?Theme.Accent:Theme.TextDim;
    archiveSlotText.Visibility=archiveMode?Visibility.Visible:Visibility.Collapsed;
   }
@@ -222,6 +222,7 @@ namespace ElymsPet {
    if(archiveView!=null)archiveView.Visibility=archiveMode&&full?Visibility.Visible:Visibility.Collapsed;
   }
   void SetMode(bool on) {
+   if(on&&!PluginAccess.Enabled(pet.State,"archive")){pet.OpenPanel(PanelTab.Plugins);return;}
    if(archiveMode==on) {if(on) {archive.EnsureQuestion();RebuildArchive();UpdateQuestionBanner();}FocusInput();return;}
    archiveMode=on;
    if(on) {archive.EnsureQuestion();RebuildArchive();}
@@ -266,6 +267,7 @@ namespace ElymsPet {
    if(chat.Busy) {metaText.Text="等这条回复回来…";return;}
    string text=(input.Text??"").Trim();
    if(text.Length==0)return;
+   if(text.Length>ChatService.MaxInputChars){metaText.Text="超过 4000 字，请分段发送；原文已保留。";return;}
    input.Clear();
    chat.Send(text);
    input.Focus();
@@ -283,6 +285,7 @@ namespace ElymsPet {
    else send.Ready=!chat.Busy&&(input.Text??"").Trim().Length>0;
   }
   void RefreshStatus() {
+   view.SetActivity(chat.Busy?chat.ActivityLabel:"");
    if(archiveMode) {
     if(archive.Busy) {headerStatus.Text="◌ "+(archive.BusyTitle.Length>0?archive.BusyTitle:"正在处理…");headerStatus.Foreground=Theme.Lav;}
     else if(archive.Slot==null) {headerStatus.Text="○ 还没有存档";headerStatus.Foreground=Theme.TextDim;}
@@ -291,7 +294,7 @@ namespace ElymsPet {
     return;
    }
    var key=ApiKey.Resolve(pet.State);
-   if(chat.Busy) {headerStatus.Text="◌ 正在接通 DeepSeek…";headerStatus.Foreground=Theme.Lav;}
+   if(chat.Busy) {headerStatus.Text="◌ "+chat.LastHint;headerStatus.Foreground=Theme.Lav;}
    else if(pet.State.Sleeping) {headerStatus.Text="☾ 休息中 · 说一句话就会醒来";headerStatus.Foreground=Theme.TextDim;}
    else if(!pet.State.AiChat) {headerStatus.Text="○ 离线对白模式";headerStatus.Foreground=Theme.TextDim;}
    else if(!key.Configured) {headerStatus.Text="○ 未配置 API Key · 仍可离线聊天";headerStatus.Foreground=Theme.Brush("#8F642D");}
@@ -419,3 +422,5 @@ namespace ElymsPet {
   }
  }
 }
+
+

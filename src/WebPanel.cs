@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
@@ -54,8 +54,7 @@ namespace ElymsPet {
     Ui.Text("联网",18,"#4F3B43"),
     Ui.Text("通过 DeepSeek Search 搜索公开网页，或读取你给出的网址。查询和网址会发送到 DeepSeek；网页正文只作为资料，不会被当成指令执行。",12,"#78616A"),
     status,
-    Ui.Text("搜索关键词",12,"#78616A"),
-    query,
+    ModernControls.Search(query,"搜索网页、资料或问题"),
     Ui.Row(search),
     needContent,
     Ui.Text("读取指定网页",12,"#78616A"),
@@ -217,3 +216,4 @@ namespace ElymsPet {
   public void Dispose() {closed=true;work.Dispose();}
  }
 }
+

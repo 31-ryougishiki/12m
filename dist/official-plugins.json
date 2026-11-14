@@ -1,0 +1,47 @@
+[
+  {
+    "Hash": "14ee39ee7f06e01f9ea8c3109f8f39ee3c5305df782e1f94778132a887311eb4",
+    "Name": "存档单元",
+    "Description": "交流新内容、整理流程、逐项补充与审阅。",
+    "Api": 1,
+    "Version": "1.0.0",
+    "Id": "archive",
+    "Permissions": "本地存档读写；按请求调用 AI 和公开资料"
+  },
+  {
+    "Hash": "dd5a1667f1962cd943793ddd93caec1d2aef3991434b9be5ec6d5fd1ab645b58",
+    "Name": "知识图谱",
+    "Description": "领域图谱、节点编辑、关系浏览和 AI / DSH 编辑接收。",
+    "Api": 1,
+    "Version": "1.0.0",
+    "Id": "graph",
+    "Permissions": "本地知识库读写；按请求读取映射仓库源码片段并调用 AI；读取图谱编辑请求"
+  },
+  {
+    "Hash": "dfb3dc1ab1a0eee7f61adf096218a81d8eb654a9a46066a09d8c0da3f56296b0",
+    "Name": "B站",
+    "Description": "搜索视频、阅读评论、登录和互动。",
+    "Api": 1,
+    "Version": "1.0.0",
+    "Id": "bili",
+    "Permissions": "访问 B站；本机保存登录；发布或删除评论仍需确认"
+  },
+  {
+    "Hash": "fa7101c4e56b3994281ce318fe070bb1b80d092989a812439d684d6fb452b5c1",
+    "Name": "DSH 连接",
+    "Description": "委托任务、回传结果、传递流程与图谱路径。",
+    "Api": 1,
+    "Version": "1.0.0",
+    "Id": "dsh",
+    "Permissions": "连接本机 DSH；任务权限沿用 DSH 设置"
+  },
+  {
+    "Hash": "fd409814834ef53a89214a4535c8c6e652186fcd2f2a9e264810e3b373047796",
+    "Name": "云同步",
+    "Description": "为共享存档与图谱上传版本和恢复备份。",
+    "Api": 1,
+    "Version": "1.0.0",
+    "Id": "cloud",
+    "Permissions": "访问已配置的 OSS；本机加密保存凭据"
+  }
+]

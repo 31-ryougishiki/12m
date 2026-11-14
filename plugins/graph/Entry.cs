@@ -1,0 +1,2 @@
+﻿using System;
+namespace ElymsPet.Plugins.graph { public sealed class Entry:IOfficialPlugin { public PluginPage Create(PetWindow pet,Action<PanelTab> navigate){var panel=new KnowledgeGraphPanel(pet.Archive,delegate(string topic){pet.Panel.StartGraphTopic(topic);},pet.Conversation);return new PluginPage{Root=panel.Root,Close=panel.Dispose};} } }

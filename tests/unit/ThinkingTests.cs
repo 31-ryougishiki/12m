@@ -17,7 +17,7 @@ namespace ElymsPet {
    Check(high.Contains("\"type\":\"enabled\"")&&high.Contains("\"reasoning_effort\":\"high\"")&&high.Contains("\"max_tokens\":16384"),"wire request enables high reasoning without old 4096 token cap");
    Check(Request(true,2048,"low").Contains("\"reasoning_effort\":\"low\""),"normal chat retains low effort");
    string off=Request(false,350,"high");Check(off.Contains("\"type\":\"disabled\"")&&!off.Contains("reasoning_effort"),"fast planner omits reasoning effort");
-   Check(Request(true,999999,"invalid").Contains("\"max_tokens\":16384")&&Request(true,8192,"invalid").Contains("\"reasoning_effort\":\"low\""),"invalid options stay bounded");
+   Check(Request(true,999999,"invalid").Contains("\"max_tokens\":65536")&&Request(true,8192,"invalid").Contains("\"reasoning_effort\":\"low\""),"invalid options stay bounded");
    var result=DeepSeek.ParseResponse("{\"choices\":[{\"message\":{\"content\":\"最终回答\",\"reasoning_content\":\"PRIVATE_REASONING_SENTINEL\"},\"finish_reason\":\"stop\"}],\"usage\":{\"completion_tokens\":90,\"completion_tokens_details\":{\"reasoning_tokens\":75}}}",1);
    Check(result.Ok&&result.HasReasoning&&result.ReasoningTokens==75&&result.Text=="最终回答"&&!result.Detail.Contains("PRIVATE_REASONING"),"reasoning metadata is available without exposing or storing thought text");
    string json="{\"choices\":[{\"message\":{\"content\":\""+new string('x',6000)+"\"},\"finish_reason\":\"stop\"}]}";

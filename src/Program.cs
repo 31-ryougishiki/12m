@@ -24,11 +24,12 @@ namespace ElymsPet {
     return saved?0:1;
    }
    if(Array.IndexOf(args,"--clear-key")>=0) {
-    var state=Storage.Load();state.ApiKey="";
+    var state=Storage.Load();state.ApiKey="";state.ProtectedApiKey=null;
     bool saved=Storage.Save(state);if(saved)Storage.ForgetBackups();
     return saved?0:1;
    }
    if(Array.IndexOf(args,"--api-test")>=0) return DiagnosticCommands.ApiCheck(false,"");
+   if(Array.IndexOf(args,"--stream-test")>=0) return DiagnosticCommands.StreamCheck();
    int chatArg=Array.IndexOf(args,"--chat");
    if(chatArg>=0) return DiagnosticCommands.ApiCheck(true,chatArg+1<args.Length?args[chatArg+1]:"你好");
    int webArg=Array.IndexOf(args,"--web-test");
@@ -50,6 +51,8 @@ namespace ElymsPet {
    int archiveArg=Array.IndexOf(args,"--archive");
    if(archiveArg>=0) return DiagnosticCommands.ArchiveCheck(archiveArg+1<args.Length?args[archiveArg+1]:"");
    if(Array.IndexOf(args,"--archive-init")>=0) return DiagnosticCommands.ArchiveInit();
+   int restart=Array.IndexOf(args,"--restart-after");
+   if(restart>=0&&restart+1<args.Length){int id;if(int.TryParse(args[restart+1],out id))try{var old=System.Diagnostics.Process.GetProcessById(id);if(!old.WaitForExit(15000))return 1;}catch(ArgumentException){}}
    bool preview=Array.IndexOf(args,"--render")>=0;
    System.Windows.Media.RenderOptions.ProcessRenderMode=System.Windows.Interop.RenderMode.SoftwareOnly;
    bool first;
@@ -71,7 +74,7 @@ namespace ElymsPet {
    var pet=new PetWindow(preview?new PetState():Storage.Load(),preview);app.MainWindow=pet;
    if(!preview) {
     recall=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\ElymsDesktopPet.Recall");
-    var thread=new Thread(delegate(){while(true){recall.WaitOne();if(!app.Dispatcher.HasShutdownStarted)app.Dispatcher.BeginInvoke(new Action(pet.Recover));}});thread.IsBackground=true;thread.Start();
+    var thread=new Thread(delegate(){while(true){recall.WaitOne();if(!app.Dispatcher.HasShutdownStarted)app.Dispatcher.BeginInvoke(new Action(pet.OpenPanel));}});thread.IsBackground=true;thread.Start();
    }
    pet.Show();
    if(preview) {
@@ -95,7 +98,7 @@ namespace ElymsPet {
     var prompt=new PromptWindow("删除这个存档及其中的画像记录？\n这个操作不能撤销。","删除存档",MessageBoxButton.YesNo,MessageBoxImage.Warning);prompt.Show();prompt.UpdateLayout();DiagnosticCommands.Render(prompt,Path.Combine(folder,"confirmation.png"));prompt.Close();
     panel.Close();pet.Close();return 0;
    }
-   if(Array.IndexOf(args,"--panel")>=0)pet.OpenPanel();
+   if(Array.IndexOf(args,"--chatbar")<0&&Array.IndexOf(args,"--sleep")<0)pet.OpenPanel();
    if(Array.IndexOf(args,"--chatbar")>=0)pet.OpenChatBar();
    if(Array.IndexOf(args,"--sleep")>=0&&!pet.State.Sleeping)pet.SleepToggle();
    app.Run();return 0;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.Serialization;
@@ -122,6 +122,7 @@ namespace ElymsPet {
    }
    if(plan==null)plan=new AutonomyPlan();
    string type=(plan.Type??"rest").ToLowerInvariant();
+   if((type=="bili"&&!PluginAccess.Enabled(settings,"bili"))||(type=="dsh"&&!PluginAccess.Enabled(settings,"dsh"))){Complete("rest","对应插件未启用，这次休息一下");return;}
    if(type=="chat") {
     string message=(plan.Message??"").Trim();
     if(message.Length==0)message="在忙吗？我只是突然想过来打个招呼。";

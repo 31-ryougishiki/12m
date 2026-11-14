@@ -6,7 +6,32 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { JobRegistry } from '../lib/job-registry.js'
-import { apply } from '../lib/index.js'
+import { apply, wrapTask } from '../lib/index.js'
+import { knowledgeManifest } from '../lib/knowledge.js'
+
+test('read-only research wrapper asks for code evidence without write instructions', () => {
+  const prompt = wrapTask('阅读源码回答字段用途', 'D:/code/12m', null, 'read-only')
+  assert.ok(prompt.includes('当前任务只读') && prompt.includes('实际读取的文件位置'))
+  assert.ok(!prompt.includes('实际修改、创建') && !prompt.includes('改了什么'))
+  assert.ok(wrapTask('修改代码', 'D:/code/12m', null, 'workspace-write').includes('实际修改、创建'))
+})
+
+test('knowledge handoff preserves absolute paths and separates drafts from task instructions', () => {
+  const root = join(tmpdir(), '知识库 with spaces')
+  const manifest = knowledgeManifest({ archive: '当前存档', root, files: [
+    { label: '流程', path: join(root, 'workflows.md') },
+    { label: '知识图谱', path: join(root, 'graph.json') },
+  ] })
+  const prompt = wrapTask('只读核对流程', root, manifest)
+  assert.ok(prompt.includes(JSON.stringify(manifest, null, 2)))
+  assert.ok(prompt.includes('草稿'))
+  assert.ok(prompt.includes('GRAPH_EDIT.md') && prompt.includes('graph-edit-result.json'))
+  assert.ok(prompt.includes('不要直接修改这些自动派生文件'))
+  assert.throws(() => knowledgeManifest({ ...manifest, files: [{ label: 'x', path: join(root, '..', 'settings.json') }] }))
+  assert.throws(() => knowledgeManifest({ ...manifest, files: [{ label: 'x', path: join(root, 'dsh-bridge.json') }] }))
+  assert.throws(() => knowledgeManifest({ ...manifest, files: [manifest.files[0], manifest.files[0]] }))
+  assert.equal(knowledgeManifest(null), null)
+})
 
 test('job slots are released once and retained history never evicts active jobs', () => {
   const registry = new JobRegistry(2, 2)
@@ -67,6 +92,7 @@ test('HTTP admission is atomic after body parsing; cancellation during creation 
   const creation = new Promise(resolve => { resolveCreation = resolve })
   const agent = { cancel() { cancellations++ }, followup() { followups++ }, whenIdle() { return Promise.resolve() } }
   const ctx = {
+    get(name) { return name === 'connection' ? { authenticatedUrl: url => url + '?token=test-browser-only' } : undefined },
     logger: () => ({ info() {}, warn() {} }),
     agents: { create() { creations++; return creation }, get() { return undefined } },
     commands: { execute() { return { kind: 'success' } } },
@@ -80,6 +106,10 @@ test('HTTP admission is atomic after body parsing; cancellation during creation 
     })
     const { port, token } = handshake
     assert.equal((await http(port, 'invalid', '/health')).status, 401)
+    assert.equal((await http(port, 'invalid', '/open')).status, 401)
+    assert.equal((await http(port, token, '/open')).body.url, 'http://127.0.0.1:3080/?token=test-browser-only')
+    assert.ok(!(JSON.stringify((await http(port, token, '/health')).body)).includes('test-browser-only'))
+    assert.equal((await http(port, token, '/task', 'POST', { prompt: 'x', knowledge: { root: 'relative' } })).status, 400)
     assert.equal((await http(port, token, '/task', 'POST', { prompt: '' })).status, 400)
     assert.equal((await http(port, token, '/health')).body.active, 0)
 
@@ -116,3 +146,37 @@ test('HTTP admission is atomic after body parsing; cancellation during creation 
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('web agents mount standard preset before receiving knowledge references', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'elyms-preset-test-'))
+  const original = process.env.LOCALAPPDATA
+  process.env.LOCALAPPDATA = root
+  let dispose, mounted = false, delivered = ''
+  const scope = {}
+  const presets = { async resolve(id) { assert.equal(id, 'standard'); return { id } }, async mount(ctx, id) { assert.equal(ctx, scope); assert.equal(id, 'standard'); mounted = true } }
+  const agent = { status: 'running', cancel() {}, followup(message) { assert.ok(mounted); delivered = message.content[0].text }, whenIdle() { return Promise.resolve() } }
+  const ctx = {
+    get(name) { return name === 'agentPresets' ? presets : undefined },
+    logger: () => ({ info() {}, warn() {} }),
+    agents: { async create(options) { assert.equal(options.meta.agentPreset, 'standard'); await options.setup(scope); return { agent } }, get() { return agent } },
+    commands: { execute() { return { kind: 'success' } } },
+    sessions: { get() { return { deriveMessages() { return [{ role: 'assistant', content: [{ type: 'text', text: 'verified' }] }] } } } },
+    effect(callback) { dispose = callback() },
+  }
+  try {
+    apply(ctx, { workspace: root })
+    const h = await until(() => { try { return JSON.parse(readFileSync(join(root, 'ElymsDesktopPet', 'dsh-bridge.json'), 'utf8')) } catch { return null } })
+    const manifest = { archive: '测试', root, files: [{ label: '图谱', path: join(root, 'graph.json') }] }
+    const result = await http(h.port, h.token, '/task', 'POST', { prompt: '检查', knowledge: manifest })
+    assert.equal(result.status, 202)
+    await until(() => delivered)
+    assert.ok(delivered.includes(JSON.stringify(manifest, null, 2)))
+    await until(async () => (await http(h.port, h.token, '/health')).body.active === 0)
+  } finally {
+    dispose?.()
+    if (original === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = original
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+

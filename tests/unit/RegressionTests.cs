@@ -20,12 +20,22 @@ namespace ElymsPet {
    try {
     if(SelfTest.Run()!=0)throw new Exception(File.ReadAllText("tests/results.txt"));
     Console.WriteLine("PASS legacy: 101 checks");
+    ExperienceReviewTests.Run(root);
+    PluginTests.Run(root);
+    WorkflowReviewTests.Run(root);
+    DshKnowledgeTests.Run(root);
+    ArchiveCloudTests.Run(root);
+    ArchiveCloudFlowTests.Run(root);
     ArchiveKnowledgeTests.Run(root);
     ArchiveLearningTests.Run(root);
-    KnowledgeGraphTests.Run(root);
+    KnowledgeGraphTests.Run(root);DomainGraphTests.Run(root);RepositoryLearningTests.Run();RepositoryArchitectureTests.Run();GraphAiCreationTests.Run(root);GraphReadingTests.Run(root);ModuleHierarchyTests.Run(root);ReadableExplanationTests.Run(root);NodeReadingGuideTests.Run(root);LocalRepositoryTests.Run(root);
     ArchiveResearchTests.Run(root);
+    SourceResearchTests.Run(root);
+    DshSourceResearchTests.Run(root);
+    DshGraphEditingTests.Run(root);
     AssessmentTests.Run(root);
     ThinkingTests.Run();
+    GraphCompletionTests.Run(root);
     ShareAttachmentTests.Run(root);
     MemoryRoundTrip(root);
     ConversationInputs(root);

@@ -16,6 +16,9 @@ namespace ElymsPet {
    Check(manager.Change("archive","disable")&&manager.Enabled("archive"),"disable leaves in-flight runtime unchanged until restart");
    manager=new PluginManager(folder,app,false);Check(!manager.Enabled("archive")&&manager.Installed("archive"),"disabled package stays installed");
    Check(manager.Change("archive","enable"),"disabled plugin can be enabled without reinstall");
+   Check(manager.RequiresRestart("archive")&&!manager.RequiresRestart("graph")&&manager.StateText("archive").Contains("启用待重启"),"pending activation is explicit and scoped to the changed plugin");
+   Check(RadialMenuLayout.Visible(PluginPanel.EntriesAfterActivation("Companion,Settings","graph","enable"),PanelTab.Graph),"reenabling graph restores its radial entry");
+   Check(PluginPanel.EntriesAfterActivation("Companion,Settings","graph","disable")=="Companion,Settings","disabling does not add a shortcut");
    manager=new PluginManager(folder,app,false);Check(manager.Enabled("archive"),"reenabled plugin returns after restart");
    string installed=Path.Combine(folder,"plugins","installed","archive",manager.Package("archive").Hash,"module.dll");
    Check(manager.Change("archive","remove")&&File.Exists(installed),"uninstall is staged while existing code may still be in use");
@@ -25,7 +28,9 @@ namespace ElymsPet {
    Check(manager.Enabled("archive")&&File.Exists(data),"reinstall retains existing data");
    File.WriteAllText(installed,"damaged");manager=new PluginManager(folder,app,false);
    Check(!manager.Enabled("archive")&&manager.StateText("archive").Contains("不匹配"),"corrupt installed code is rejected without preventing host startup");
-   Check(manager.Change("archive","install"),"repair replaces corrupt package");manager=new PluginManager(folder,app,false);Check(manager.Enabled("archive"),"repair is verified on restart");
+   Check(manager.Change("archive","install"),"repair replaces corrupt package");
+   Check(manager.StateText("archive").Contains("启用待重启")&&!manager.StateText("archive").Contains("不匹配"),"successful repair replaces stale load error with restart guidance");
+   manager=new PluginManager(folder,app,false);Check(manager.Enabled("archive")&&!manager.RequiresRestart("archive"),"repair is verified on restart");
    var missing=new PluginManager(Path.Combine(root,"plugin-missing"),Path.Combine(root,"empty-app"),false);
    Check(!missing.Change("bili","install")&&!missing.Installed("bili"),"missing installer cannot leave an installed registry entry");
    var state=new PetState{Plugins=missing,AiChat=true,DshEnabled=true};

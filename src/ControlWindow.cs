@@ -120,7 +120,7 @@ namespace ElymsPet {
    chatHead.Children.Add(face);Grid.SetColumn(face,0);
    chatHead.Children.Add(chatTitle);Grid.SetColumn(chatTitle,1);
    chatHead.Children.Add(floatButton);Grid.SetColumn(floatButton,2);
-   chatView=new ChatView(false);
+   chatView=new ChatView(false,pet.Conversation.Resend);
    var chatFrame=new Border{Background=Brush("#F8FAFF"),BorderBrush=Brush("#8996B5"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(0),Padding=new Thickness(10,8,6,8),Margin=new Thickness(0,0,0,10),Child=chatView};
    chatInput=ChatInput.Field();
    chatInput.Resources.Add(typeof(System.Windows.Controls.Primitives.ScrollBar),Theme.ScrollBarStyle);
@@ -143,7 +143,7 @@ namespace ElymsPet {
    var conversation=new DockPanel();
    var conversationHeader=Stack(chatHead,aiStatus);DockPanel.SetDock(conversationHeader,Dock.Top);conversation.Children.Add(conversationHeader);
    stopChat=Button("停止回复",delegate{pet.Conversation.Stop();},false);
-   retryChat=Button("重新编辑上一条",delegate{if(!pet.Conversation.Busy){chatInput.Text=pet.Conversation.LastUserInput??"";chatInput.Focus();}},false);
+   retryChat=Button("重发上一条",pet.Conversation.ResendLast,false);
    var actions=Row(Button("配置 AI",delegate{SelectTab(PanelTab.Settings);},false),Button("开始专注",delegate{SelectTab(PanelTab.Focus);},false),Button("记便签",delegate{SelectTab(PanelTab.Notes);},false),stopChat,retryChat);
    foreach(Button action in actions.Children){action.FontSize=13;action.Padding=new Thickness(9,6,9,6);action.Margin=new Thickness(0,0,6,3);}
    var composer=Stack(reply,inputBorder,chatHint,actions);DockPanel.SetDock(composer,Dock.Bottom);conversation.Children.Add(composer);
@@ -220,7 +220,7 @@ namespace ElymsPet {
    dshSettings.Children.Add(Check("DSH 任务自动执行（跳过逐次确认，谨慎）",pet.State.DshAutoRun,delegate(bool v){pet.State.DshAutoRun=v;pet.Save();}));
    dshSettings.Children.Add(Check("允许完整访问（可执行命令与写入，谨慎）",pet.State.DshFullAccess,delegate(bool v){pet.State.DshFullAccess=v;pet.Save();}));
    dshSettings.Children.Add(Row(Button("打开 DSH 工作台",delegate {SelectTab(PanelTab.Workbench);},true),Button("打开 DSH 页面",delegate {pet.Dsh.OpenWeb();},false)));
-   dshSettings.Children.Add(Text("DSH 桥接由 dsh-elyms-bridge 插件提供；DSH 启动后可用。写操作会先在桌面确认；完整访问只建议在信任 DSH agent 时打开。",11,"#795F69"));
+   dshSettings.Children.Add(Text("DSH 桥接由 dsh-elyms-bridge 插件提供；提交时未运行会自动启动。写操作会先在桌面确认；完整访问只建议在信任 DSH agent 时打开。",11,"#795F69"));
    var auto=new StackPanel();
    auto.Children.Add(Text("自主时间",18,"#4F3B43"));
    auto.Children.Add(Text("大约每 30 分钟，她会自己决定做一件小事：找你聊天、去 B站逛逛、写一段自己的笔记，或在显式允许时让 DSH 做一个小实验。睡眠和专注时会跳过。",12,"#78616A"));
@@ -296,7 +296,7 @@ namespace ElymsPet {
    chatView.ShowEmpty("对话记忆已清空。想聊什么，直接写下来就好。");
    reply.Text="对话记忆已经清空。";if(contextStatus!=null)contextStatus.Text=pet.Conversation.ContextLabel;UpdateSendState();
   }
-  void UpdateSendState() {if(stopChat!=null)stopChat.IsEnabled=pet.Conversation.CanStop;if(retryChat!=null)retryChat.IsEnabled=!pet.Conversation.Busy&&!string.IsNullOrEmpty(pet.Conversation.LastUserInput);chatHint.Text=chatInput.Text.Length+" / 4000 字 · Enter 发送 · Shift + Enter 换行";sendCircle.Ready=!pet.Conversation.Busy&&(chatInput.Text??"").Trim().Length>0;}
+  void UpdateSendState() {if(stopChat!=null)stopChat.IsEnabled=pet.Conversation.CanStop;if(retryChat!=null)retryChat.IsEnabled=pet.Conversation.CanResend;chatHint.Text=chatInput.Text.Length+" / 4000 字 · Enter 发送 · Shift + Enter 换行";sendCircle.Ready=!pet.Conversation.Busy&&(chatInput.Text??"").Trim().Length>0;}
   static string ClipText(string text,int max) {text=(text??"").Trim();return text.Length<=max?text:text.Substring(0,max)+"…";}
   void RefreshKeyHint() {
    if(keyHint==null)return;

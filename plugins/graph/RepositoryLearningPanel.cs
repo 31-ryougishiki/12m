@@ -45,10 +45,26 @@ namespace ElymsPet {
    var learning=node.Learning??new NodeLearning();var box=new StackPanel();
    DetailSection(box,"这一步的学习目标",string.IsNullOrWhiteSpace(learning.Goal)?"先定位输入与输出，再沿关联节点追踪一次请求。":learning.Goal);
    var steps=new WrapPanel();foreach(var edge in graph.Edges)if(edge.Label=="学习下一步"&&(edge.From==node.Id||edge.To==node.Id)){string target=edge.From==node.Id?edge.To:edge.From;var next=graph.Nodes.Find(delegate(DomainNode n){return n.Id==target;});if(next!=null){var step=Link(edge.From==node.Id?"下一步 →":"← 上一步",delegate{SelectNode(target);CenterSelected();},next.Title);step.Margin=new Thickness(0,0,18,8);steps.Children.Add(step);}}box.Children.Add(steps);
-   var output=Text("",14,"#33405B");output.Visibility=Visibility.Collapsed;
-   var explain=Button("曳尔沐讲解",delegate{});explain.HorizontalAlignment=HorizontalAlignment.Left;
+   var explanationGraph=graph;string savedNotice;var saved=archive.SavedRepositoryExplanation(explanationGraph,node,out savedNotice);
+   var savedLabel=Text(savedNotice,12,"#687794");savedLabel.Visibility=savedNotice.Length==0?Visibility.Collapsed:Visibility.Visible;
+   var output=new RepositoryExplanationView();output.Show(saved);output.Visibility=saved==null?Visibility.Collapsed:Visibility.Visible;
+   var generationNotice=Text("",13,"#687794");generationNotice.Visibility=Visibility.Collapsed;
+   var attempt=new Expander{Header="查看本次生成结果",Visibility=Visibility.Collapsed,IsExpanded=false};
+   var explain=Button(saved==null?"曳尔沐讲解":"重新生成讲解",delegate{});explain.HorizontalAlignment=HorizontalAlignment.Left;
    var feedback=EditAction("检查复述",delegate{});var feedbackOutput=Text("",14,"#33405B");feedbackOutput.Visibility=Visibility.Collapsed;
-   explain.Click+=delegate{explain.IsEnabled=false;feedback.IsEnabled=false;output.Visibility=Visibility.Visible;output.Text="正在组织讲解…";archive.ExplainRepositoryNode(graph,node,"解释当前代码及整体流程中的位置；必要时补充特性来源、设计模式、数学或语言基础，并注明证据缺口",delegate(string answer){if(disposed)return;output.Text=answer;explain.IsEnabled=true;feedback.IsEnabled=true;});};box.Children.Add(explain);box.Children.Add(output);
+   explain.Click+=delegate{
+    explain.IsEnabled=false;feedback.IsEnabled=false;generationNotice.Visibility=Visibility.Visible;generationNotice.Text=saved==null?"正在组织讲解…":"正在重新生成，下方保留上次讲解…";attempt.Visibility=Visibility.Collapsed;
+    string previousId=saved==null?null:saved.RequestId;
+    archive.ExplainRepositoryNode(explanationGraph,node,RepositoryLearning.ExplanationFocus,delegate(string answer){
+     if(disposed)return;string notice;var latest=archive.SavedRepositoryExplanation(explanationGraph,node,out notice);
+     if(latest!=null){
+      saved=latest;output.Show(latest);savedLabel.Text=notice;savedLabel.Visibility=Visibility.Visible;explain.Content="重新生成讲解";
+      if(latest.RequestId==previousId){generationNotice.Text="本次未更新已保存讲解，下方仍是上次结果。";attempt.Content=Text(answer,14,"#33405B");attempt.Visibility=Visibility.Visible;}
+      else {generationNotice.Text="讲解已保存，下次打开可直接阅读。";if(answer!=latest.DisplayText){attempt.Content=Text(answer,14,"#33405B");attempt.Visibility=Visibility.Visible;}}
+     }else {output.Text=answer;generationNotice.Text="本次结果尚未保存为完整讲解，可重试。";savedLabel.Text=notice;savedLabel.Visibility=notice.Length==0?Visibility.Collapsed:Visibility.Visible;}
+     output.Visibility=Visibility.Visible;explain.IsEnabled=true;feedback.IsEnabled=true;
+    });
+   };box.Children.Add(explain);box.Children.Add(generationNotice);box.Children.Add(savedLabel);box.Children.Add(output);box.Children.Add(attempt);
    var practice=new StackPanel{Margin=new Thickness(0,10,0,0)};practice.Children.Add(Text(string.IsNullOrWhiteSpace(learning.Question)?"不看解释，说出这一步由谁调用、改变了什么、失败会影响哪里？":learning.Question,14,"#33405B"));
    string draftKey=archive.Slot.Id+"/"+graph.Id+"/"+node.Id,draftText;var reflection=Ui.Input(reflectionDrafts.TryGetValue(draftKey,out draftText)?draftText:learning.Reflection??"",110);reflectionEditor=reflection;reflectionKey=draftKey;reflection.AcceptsReturn=true;reflection.TextWrapping=TextWrapping.Wrap;reflection.MaxLength=12000;reflection.ToolTip="写下自己的解释，保存或请求反馈";practice.Children.Add(reflection);
    var save=EditAction("保存复述",delegate{SaveLearning(node,delegate(NodeLearning value){value.Reflection=reflection.Text;});});practice.Children.Add(Ui.Row(save,feedback));

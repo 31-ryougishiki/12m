@@ -24,6 +24,7 @@ namespace ElymsPet {
    Raise(); if(browsing&&Finished!=null)Finished(Current);
   }
   public void Dispose() { work.Dispose(); Busy=false; }
+  public void CancelChatBrowse(){if(!Busy||!fromChat)return;work.CancelPending();Busy=false;fromChat=false;Raise();}
   public string StatusLine {
    get {
     if(Busy) return "◌ 正在 B 站逛…";

@@ -13,7 +13,11 @@ namespace ElymsPet {
  public interface IGraphCompletionApi {
   ChatOutcome CompleteGraph(string key,string url,string model,ChatTurn[] turns,int tokens);
  }
- public sealed class ArchiveApi : IArchiveApi, IGraphCompletionApi {
+ public interface IRepositoryExplanationApi {
+  ChatOutcome CompleteExplanation(string key,string url,string model,ChatTurn[] turns,bool reader,int tokens);
+ }
+ public sealed class ArchiveApi : IArchiveApi, IGraphCompletionApi, IRepositoryExplanationApi {
+  public ChatOutcome CompleteExplanation(string key,string url,string model,ChatTurn[] turns,bool reader,int tokens) {return DeepSeek.Complete(key,url,model,true,turns,180,tokens,0.1,reader?"low":"high",65536);}
   public ChatOutcome CompleteGraph(string key,string url,string model,ChatTurn[] turns,int tokens) {return DeepSeek.Complete(key,url,model,true,turns,240,tokens,0.1,"high",262144);}
   public ChatOutcome Complete(string key,string url,string model,bool thinking,ChatTurn[] turns,int timeout,int tokens,double temperature) {return DeepSeek.Complete(key,url,model,thinking,turns,timeout,tokens,temperature,thinking?"high":"low",thinking?24000:4000);}
   public WebOutcome Search(string key,string url,string query) {return WebApi.Search(key,url,query,3,true,25);}

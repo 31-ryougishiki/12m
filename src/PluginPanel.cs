@@ -23,7 +23,8 @@ namespace ElymsPet {
     buttons.Children.Add(Ui.Button(manager.Installed(p.Id)?"更新 / 修复":"安装",delegate{Change(p.Id,"install");},!manager.Installed(p.Id)));
     if(manager.Installed(p.Id)){buttons.Children.Add(Ui.Button(manager.DesiredEnabled(p.Id)?"停用":"启用",delegate{Change(p.Id,manager.DesiredEnabled(p.Id)?"disable":"enable");},false));buttons.Children.Add(Ui.Button("卸载（保留数据）",delegate{Change(p.Id,"remove");},false));}
     if(manager.Enabled(p.Id)){string id=p.Id;buttons.Children.Add(Ui.Button("打开",delegate{navigate(PageFor(id));},false));}
-    content.Children.Add(Ui.Card(Ui.Stack(Ui.Text(p.Name+"  ·  "+p.Version,19,"#334363"),Ui.Text(p.Description,14,"#596784"),new Expander{Header="使用范围",Content=Ui.Text(p.Permissions,12,"#596784")},Ui.Text(manager.StateText(p.Id)+(manager.PendingRestart?"（本次更改待重启）":""),13,"#447969"),buttons)));
+    if(manager.RequiresRestart(p.Id))buttons.Children.Add(Ui.Button("重启并应用",Restart,true));
+    content.Children.Add(Ui.Card(Ui.Stack(Ui.Text(p.Name+"  ·  "+p.Version,19,"#334363"),Ui.Text(p.Description,14,"#596784"),new Expander{Header="使用范围",Content=Ui.Text(p.Permissions,12,"#596784")},Ui.Text(manager.StateText(p.Id),13,"#447969"),buttons)));
    }
 
   }
@@ -34,7 +35,8 @@ namespace ElymsPet {
    pet.State.RadialPages=RadialMenuLayout.Toggle(pet.State.RadialPages,page,show);pet.Save();if(pet.Menu!=null)pet.Menu.RefreshEntries();Refresh();
   }
   bool Busy(){return pet.Conversation.Busy||pet.Archive.Busy||pet.Archive.CloudBusy||pet.Bili.Busy||pet.Dsh.Busy;}
-  void Change(string id,string action){if(Busy()){PopupDialog.Show(Window.GetWindow(Root),"请等待当前任务结束，再更改插件。","插件正在使用");return;}if(pet.State.Plugins.Change(id,action)&&action=="install"){PanelTab page=PageFor(id);foreach(var entry in RadialMenuLayout.Entries)if(entry.Page==page)pet.State.RadialPages=RadialMenuLayout.Toggle(pet.State.RadialPages,page,true);pet.Save();}Refresh();}
+  public static string EntriesAfterActivation(string pages,string id,string action){if(action!="install"&&action!="enable")return pages;PanelTab page=PageFor(id);foreach(var entry in RadialMenuLayout.Entries)if(entry.Page==page)return RadialMenuLayout.Toggle(pages,page,true);return pages;}
+  void Change(string id,string action){if(Busy()){PopupDialog.Show(Window.GetWindow(Root),"请等待当前任务结束，再更改插件。","插件正在使用");return;}if(pet.State.Plugins.Change(id,action)){pet.State.RadialPages=EntriesAfterActivation(pet.State.RadialPages,id,action);pet.Save();if(pet.Menu!=null)pet.Menu.RefreshEntries();}Refresh();}
   void Restart(){if(Busy()){PopupDialog.Show(Window.GetWindow(Root),"当前任务尚未结束，请完成后重启。","暂不能重启");return;}if(pet.Panel!=null)pet.Panel.Close();pet.Save();System.Diagnostics.Process.Start(System.Reflection.Assembly.GetEntryAssembly().Location,"--restart-after "+System.Diagnostics.Process.GetCurrentProcess().Id);pet.Close();}
   public static PluginPage Missing(PetWindow pet,string id,Action<PanelTab> navigate){return new PluginPage{Root=Ui.Card(Ui.Stack(Ui.Text(pet.State.Plugins.Package(id).Name,22,"#334363"),Ui.Text(pet.State.Plugins.StateText(id)+"。安装并启用后即可使用，已有数据保留。",14,"#596784"),Ui.Button("管理插件",delegate{navigate(PanelTab.Plugins);},true)))};}
  }

@@ -7,6 +7,7 @@ namespace ElymsPet {
  public static class NetworkCancellation {
   [ThreadStatic] static CancellationToken token;
   [ThreadStatic] static List<CancellationTokenRegistration> registrations;
+  public static bool IsCancellationRequested {get{return token.IsCancellationRequested;}}
   public static void Track(HttpWebRequest request){token.ThrowIfCancellationRequested();if(registrations!=null)registrations.Add(token.Register(request.Abort));}
   public static T Run<T>(CancellationToken value,Func<T> action){
    var old=token;var previous=registrations;token=value;registrations=new List<CancellationTokenRegistration>();

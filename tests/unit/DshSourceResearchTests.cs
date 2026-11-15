@@ -8,7 +8,7 @@ namespace ElymsPet {
    public int Starts,Polls,Cancels;public string Task;public DshJob Result=new DshJob{Id="read-job",Status="done",Tools=4,Text="LoggingStatLogger.record reads iteration_details (loggers.py:187)."};
    public DshJob Start(string task){Task=task;Starts++;return new DshJob{Id="read-job",Status="queued"};}
    public DshJob Poll(string id){Check(id=="read-job","poll uses the submitted job id");Polls++;return Result;}
-   public bool Cancel(string id){Cancels++;return true;}
+   public bool Cancel(string id){if(NetworkCancellation.IsCancellationRequested)throw new Exception("cancel request inherited cancelled token");Cancels++;return true;}
   }
   public static void Run(string root){
    string previous=Storage.Folder,repo=Path.Combine(root,"DSH 源码");Directory.CreateDirectory(repo);
@@ -33,6 +33,11 @@ namespace ElymsPet {
     client=new Client();client.Result.Text="";result=make(client).Complete(turns,Request);Check(!result.Ok,"empty DSH conclusion cannot trigger synthesis");
     client=new Client();client.Result.Status="running";result=make(client).Complete(turns,Request);Check(!result.Ok&&client.Polls==2&&client.Cancels==1,"timed out source jobs are bounded and cancelled");
     client=new Client();result=make(client).Complete(turns,Request,true,()=>client.Starts>0);Check(!result.Ok&&client.Polls==0&&client.Cancels==1,"closing the owner cancels its source job without further polls");
+    client=new Client();using(var cancellation=new System.Threading.CancellationTokenSource()){
+     var cancelledClient=client;var research=new DshSourceResearch(settings,new[]{url},"",client,()=>cancellation.Cancel(),2);
+     result=NetworkCancellation.Run(cancellation.Token,()=>research.Complete(turns,Request));
+     Check(!result.Ok&&cancelledClient.Cancels==1&&cancelledClient.Polls==0,"forced stop cancels the remote DSH job with an independent cancellation request");
+    }
     client=new Client();calls=0;result=make(client).Complete(turns,input=>{calls++;return new ChatOutcome{Ok=true,Text=calls==1?"[[SOURCE_READ]]{malformed legacy JSON":"done"};});Check(result.Ok&&client.Starts==1,"legacy history markers route to DSH without parsing generated JSON");
     client=new Client();calls=0;result=make(client).Complete(turns,input=>++calls==1?Request(input):new ChatOutcome{Ok=true,Text="[[DSH_TASK]]write files[[/DSH_TASK]]"});Check(!result.Ok&&client.Starts==1,"source synthesis cannot escalate into a write task");
     Check(Directory.GetFiles(Path.Combine(Storage.Folder,"dsh-source-research"),"*.jsonl").Length==1,"DSH job ids and result statuses are available for debugging");

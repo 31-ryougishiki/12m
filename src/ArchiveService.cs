@@ -12,6 +12,7 @@ namespace ElymsPet {
   readonly IWorkScheduler sourceScheduler;
   readonly IRepository<ArchiveBook> repository;
   readonly IArchiveApi api;
+  readonly RepositoryExplanationStore explanationStore;
   public string Digest {get;private set;}
   ArchiveBook book;
   ArchiveSlot slot;
@@ -20,8 +21,10 @@ namespace ElymsPet {
   string pendingAnswer="";
   int turnRevision,profileRevision,slotRevision;
   public event Action Changed;
-  public ArchiveService(PetState state,IWorkScheduler scheduler,PetFeedback feedback,IRepository<ArchiveBook> repository,bool preview,IArchiveApi api=null,IArchiveCloudClient cloudApi=null) {
+  public ArchiveService(PetState state,IWorkScheduler scheduler,PetFeedback feedback,IRepository<ArchiveBook> repository,bool preview,IArchiveApi api=null,IArchiveCloudClient cloudApi=null) : this(state,scheduler,feedback,repository,preview,api,cloudApi,null) { }
+  public ArchiveService(PetState state,IWorkScheduler scheduler,PetFeedback feedback,IRepository<ArchiveBook> repository,bool preview,IArchiveApi api,IArchiveCloudClient cloudApi,RepositoryExplanationStore explanationStore) {
    this.api=api??new ArchiveApi();
+   this.explanationStore=explanationStore??new RepositoryExplanationStore(preview?null:Storage.Folder);
    sourceScheduler=scheduler;
    this.preview=preview;this.state=state;this.feedback=feedback;this.repository=repository;
    work=new WorkScope(scheduler,delegate(string error) {busy=false;busyTitle="";status=error+" 原话已保留，点「继续 / 重试」重试当前阶段。";Raise();},!preview);

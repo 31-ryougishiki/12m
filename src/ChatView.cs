@@ -18,10 +18,12 @@ namespace ElymsPet {
   readonly TextBlock activityText=new TextBlock();
   readonly Border activity=new Border();
   readonly bool compact;
+  readonly Action<ChatLine> resend;
   ChatSpeaker lastSpeaker=ChatSpeaker.Notice;
   public double BubbleMaxWidth;
-  public ChatView(bool compact) {
+  public ChatView(bool compact,Action<ChatLine> resend=null) {
    this.compact=compact;
+   this.resend=resend;
    activityText.FontSize=compact?12:13;activityText.Foreground=Theme.Lav;activityText.TextWrapping=TextWrapping.Wrap;
    activity.Child=activityText;activity.Background=Theme.HerBubble;activity.BorderBrush=Theme.HerBorder;activity.BorderThickness=new Thickness(1);activity.Padding=new Thickness(12,9,12,9);activity.Margin=new Thickness(0,0,0,10);activity.HorizontalAlignment=HorizontalAlignment.Left;
    BubbleMaxWidth=compact?300:440;
@@ -83,20 +85,7 @@ namespace ElymsPet {
    var time=new Run("  "+line.Time.ToString("HH:mm")){Foreground=Theme.TextDim,FontSize=12};
    label.Inlines.Add(time);
    block.Children.Add(label);
-   var text=new TextBox{
-    Text=line.Text,IsReadOnly=true,IsReadOnlyCaretVisible=false,AcceptsReturn=true,
-    TextWrapping=TextWrapping.Wrap,FontFamily=Theme.ReadingFont,FontSize=compact?13:15,
-    Foreground=mine?Theme.UserText:Theme.HerText,
-    Background=Brushes.Transparent,BorderThickness=new Thickness(0),Padding=new Thickness(0),
-    MaxWidth=BubbleMaxWidth,MinWidth=0,MinHeight=0,IsTabStop=false,Cursor=Cursors.IBeam,
-    VerticalContentAlignment=VerticalAlignment.Top,FocusVisualStyle=null,
-    CaretBrush=Theme.Accent,SelectionBrush=Theme.Brush("#88E5B2C5"),
-    IsInactiveSelectionHighlightEnabled=true,SelectionOpacity=0.5,
-    HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,
-    VerticalScrollBarVisibility=ScrollBarVisibility.Disabled
-   };
-   TextOptions.SetTextFormattingMode(text,TextFormattingMode.Display);
-   text.ContextMenu=MessageMenu(text,line.Text);
+   var text=new MessageText(line.Text,mine?Theme.UserText:Theme.HerText,compact?13:15){MaxWidth=BubbleMaxWidth,MinWidth=0,MinHeight=0,IsTabStop=false};
    var bubble=new Border{
     Background=mine?Theme.UserBubble:Theme.HerBubble,
     BorderBrush=mine?Theme.UserBorder:Theme.HerBorder,
@@ -108,6 +97,8 @@ namespace ElymsPet {
    };
    bubble.ContextMenu=CopyMenu(line.Text);
    block.Children.Add(bubble);
+   var actions=new WrapPanel{HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left};actions.Children.Add(MessageText.CopyButton(line.Text));block.Children.Add(actions);
+   if(mine&&resend!=null){var retry=Ui.Button("重发本条",()=>resend(line),false);retry.FontSize=12;retry.Padding=new Thickness(8,3,8,3);retry.Margin=new Thickness(0,4,0,0);retry.ToolTip="重新发送这条原文；若正在回复，先停止当前回复。";actions.Children.Add(retry);}
    if(!string.IsNullOrEmpty(line.Meta)) {
     block.Children.Add(new TextBlock{Text=line.Meta,FontSize=12,Foreground=Theme.TextDim,Margin=new Thickness(mine?0:3,3,mine?3:0,0),HorizontalAlignment=mine?HorizontalAlignment.Right:HorizontalAlignment.Left});
    }
@@ -123,7 +114,7 @@ namespace ElymsPet {
     Padding=new Thickness(compact?9:11,compact?5:6,compact?10:12,compact?5:6),
     Margin=new Thickness(0,0,0,compact?9:11),
     HorizontalAlignment=source?HorizontalAlignment.Stretch:HorizontalAlignment.Center,
-    Child=new TextBlock{Text=text,TextWrapping=TextWrapping.Wrap,TextAlignment=source?TextAlignment.Left:TextAlignment.Center,FontSize=12,LineHeight=compact?16:18,Foreground=Theme.TextDim,MaxWidth=source?520:(compact?300:420)}
+    Child=new MessageText(text,Theme.TextDim,12){MaxWidth=source?520:(compact?300:420)}
    };
    var menu=MenuTheme.Create();
    var copy=MenuTheme.Item("复制这条消息","\uE8C8",null);
@@ -153,11 +144,7 @@ namespace ElymsPet {
   }
   internal static bool TryCopy(string text) {
    if(string.IsNullOrEmpty(text))return false;
-   for(int attempt=0;attempt<4;attempt++) {
-    try {Clipboard.SetText(text);return true;}
-    catch {if(attempt<3)Thread.Sleep(30);}
-   }
-   return false;
+   try{System.Windows.Forms.Clipboard.SetDataObject(text,true,5,40);return true;}catch{return false;}
   }
  }
 

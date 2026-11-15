@@ -8,7 +8,8 @@ namespace ElymsPet {
   readonly TextBox consultInput=Ui.Input("",64);
   readonly TextBlock consultScope=Text("",12,"#52617F");
   readonly StackPanel consultLines=new StackPanel();
-  ChatService consultation;Button consultSend;Expander consultReplies;Border consultCard;ScrollViewer consultScroll;
+  ChatService consultation;Button consultSend,consultStop,consultRetry;Expander consultReplies;Border consultCard;ScrollViewer consultScroll;
+  readonly TextBlock consultStatus=Text("",12,"#52617F");
   void InitializeStudyTools(ChatService chat){
    consultation=chat;
    {var box=consultInput;box.Background=Theme.Brush("#FFFFFF");box.Foreground=Theme.Brush("#29324B");box.FontSize=14;box.AcceptsReturn=true;box.VerticalContentAlignment=VerticalAlignment.Top;box.VerticalScrollBarVisibility=ScrollBarVisibility.Auto;box.Margin=new Thickness(0);box.ContextMenu=MenuTheme.EditMenu(box);}
@@ -17,7 +18,9 @@ namespace ElymsPet {
    var inputRow=new DockPanel();DockPanel.SetDock(consultSend,Dock.Right);inputRow.Children.Add(consultSend);inputRow.Children.Add(consultInput);
    consultScroll=new ScrollViewer{Content=consultLines,MaxHeight=180,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
    consultReplies=new Expander{Header="咨询记录 · 与陪伴对话同步",Content=consultScroll,Foreground=Theme.Brush("#5368B2"),FontFamily=Theme.ReadingFont,FontSize=13,Margin=new Thickness(0,6,0,0)};
-   var consultationBody=Ui.Stack(consultScope,inputRow,consultReplies);
+   consultStop=EditAction("停止回复",()=>{if(consultation!=null)consultation.Stop();});
+   consultRetry=EditAction("重发上一条",()=>{if(consultation!=null){consultReplies.IsExpanded=true;consultation.ResendLast();}});
+   var consultationBody=Ui.Stack(consultScope,inputRow,Ui.Row(consultStop,consultRetry),consultStatus,consultReplies);
    consultCard=StudyCard(consultationBody);
    studyTools.Children.Add(consultCard);
    ChatInput.EnterSends(consultInput,SendConsultation);
@@ -30,11 +33,13 @@ namespace ElymsPet {
    if(disposed)return;bool mine=line.Speaker==ChatSpeaker.User,notice=line.Speaker==ChatSpeaker.Notice;
    var color=notice?Theme.TextDim:mine?Theme.UserText:Theme.HerText;
    var label=new TextBlock{Text=mine?"你：":notice?"提示：":"曳尔沐：",Foreground=color,FontSize=12,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,4)};
-   var body=new TextBlock{Text=line.Text,Foreground=color,FontFamily=Theme.ReadingFont,FontSize=14,TextWrapping=TextWrapping.Wrap,LineHeight=23};
-   consultLines.Children.Add(new Border{Child=Ui.Stack(label,body),Background=notice?Theme.Brush("#F0F2F5"):mine?Theme.UserBubble:Theme.HerBubble,BorderBrush=notice?Theme.Brush("#CCD5E5"):mine?Theme.UserBorder:Theme.HerBorder,BorderThickness=new Thickness(1),Padding=new Thickness(10,8,10,8),Margin=new Thickness(mine?36:0,0,mine||notice?0:36,10)});
+   var body=new MessageText(line.Text,color,14);
+   var actions=new WrapPanel();actions.Children.Add(MessageText.CopyButton(line.Text));
+   var content=Ui.Stack(label,body,actions);if(mine&&consultation!=null){var retry=EditAction("重发本条",()=>consultation.Resend(line));retry.ToolTip="重新发送原问题并保留原模块上下文；若正在回复，先停止当前回复。";actions.Children.Add(retry);}
+   consultLines.Children.Add(new Border{Child=content,Background=notice?Theme.Brush("#F0F2F5"):mine?Theme.UserBubble:Theme.HerBubble,BorderBrush=notice?Theme.Brush("#CCD5E5"):mine?Theme.UserBorder:Theme.HerBorder,BorderThickness=new Thickness(1),Padding=new Thickness(10,8,10,8),Margin=new Thickness(mine?36:0,0,mine||notice?0:36,10)});
    while(consultLines.Children.Count>60)consultLines.Children.RemoveAt(0);consultScroll.Dispatcher.BeginInvoke(DispatcherPriority.Loaded,new Action(delegate{if(!disposed)consultScroll.ScrollToEnd();}));
   }
-  void ConsultationChanged(){if(disposed)return;consultSend.IsEnabled=consultation!=null&&!consultation.Busy;consultSend.Content=consultation!=null&&consultation.Busy?"正在回复…":"问曳尔沐";consultInput.IsEnabled=consultation!=null;}
+  void ConsultationChanged(){if(disposed)return;consultSend.IsEnabled=consultation!=null&&!consultation.Busy;consultSend.Content=consultation!=null&&consultation.Busy?"正在回复…":"问曳尔沐";consultInput.IsEnabled=consultation!=null;consultStop.IsEnabled=consultation!=null&&consultation.CanStop;consultRetry.IsEnabled=consultation!=null&&consultation.CanResend;consultStatus.Text=consultation==null?"":ChatText.Clip(consultation.LastHint,300);}
   void ClearConsultation(){consultLines.Children.Clear();}
   void UpdateStudyScope(){
    if(consultCard==null)return;

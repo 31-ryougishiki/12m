@@ -184,9 +184,11 @@ namespace ElymsPet {
    string content=response.choices[0].message.content;
    string finish=response.choices[0].finish_reason;
    if(string.IsNullOrEmpty(content)||content.Trim().Length==0) {
-    if(finish=="length") return ChatOutcome.Fail("回复被截断了，再问我一次好吗？","empty content, finish=length",200,seconds);
-    if(finish=="insufficient_system_resource") return ChatOutcome.Fail("服务那边资源紧张，等一会儿再试。","insufficient_system_resource",200,seconds);
-    return ChatOutcome.Fail("这次没有收到文字回复，再试一次？","empty content, finish="+finish,200,seconds);
+    var empty=ChatOutcome.Fail(finish=="length"?"回复被截断了，再问我一次好吗？":finish=="insufficient_system_resource"?"服务那边资源紧张，等一会儿再试。":"这次没有收到文字回复，再试一次？","empty content, finish="+finish,200,seconds);
+    empty.FinishReason=finish??"";empty.Model=response.model??"";empty.Truncated=finish=="length";
+    empty.HasReasoning=!string.IsNullOrWhiteSpace(response.choices[0].message.reasoning_content);
+    if(response.usage!=null){empty.PromptTokens=response.usage.prompt_tokens;empty.CompletionTokens=response.usage.completion_tokens;if(response.usage.completion_tokens_details!=null)empty.ReasoningTokens=response.usage.completion_tokens_details.reasoning_tokens;}
+    return empty;
    }
    content=content.Trim();
    int responseChars=content.Length;

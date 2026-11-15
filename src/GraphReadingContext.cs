@@ -61,6 +61,10 @@ namespace ElymsPet {
    sourceContext=text.ToString();return sourceContext;
   }
   public void AttachSources(ChatTurn[] turns){if(turns.Length>0)turns[0]=new ChatTurn(turns[0].Role,turns[0].Content+ReadSources());}
+  public List<ExplanationCodeSource> ExplanationSources(string text,ChatTurn[] context,List<string> warnings){
+   var evidence=new StringBuilder();foreach(var turn in context??new ChatTurn[0])evidence.Append(turn.Content).Append('\n');
+   return RepositoryExplanationCodeReview.Sources(text,CodeUrls,evidence.ToString(),repositories??LocalRepository.Load(),warnings);
+  }
   public ChatOutcome Complete(ChatTurn[] turns,Func<ChatTurn[],ChatOutcome> complete,bool dshEnabled=true,Func<bool> cancelled=null,Action<string> progress=null){
    return research!=null&&research.Available?research.Complete(turns,complete,dshEnabled,cancelled,progress):complete(turns);
   }

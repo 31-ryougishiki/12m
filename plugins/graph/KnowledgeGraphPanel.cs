@@ -47,7 +47,7 @@ namespace ElymsPet {
    var content=Ui.Stack(Text("ELYMS / KNOWLEDGE ARCHIVE   ▪ ▪ ▪",11,"#247A7B"),toolbar,Ui.Row(fullscreenButton,EditAction("体验 vLLM / Ascend 源码导览",delegate{var example=RepositoryLearningExample.Create();if(archive.SaveDomainGraph(example))SelectDomain(example.Id);})),heading,legend,body,status);
    Root=new Border{Background=Theme.Brush("#F2F4FA"),Padding=new Thickness(22),Child=content,CornerRadius=new CornerRadius(0)};
    ((FrameworkElement)Root).SizeChanged+=delegate{ArrangeBody(((FrameworkElement)Root).ActualWidth>=1100);};ArrangeBody(false);
-   domains.SelectionChanged+=delegate{if(!refreshing){graph=domains.SelectedItem as DomainGraph;if(graph!=null)archive.CurrentDomainId=graph.Id;selected=graph!=null&&graph.Nodes.Count>0?graph.Nodes[0].Id:"";search.Clear();Zoom(1);PrepareArchitecture();Populate();Rebuild();}};
+   domains.SelectionChanged+=delegate{if(!refreshing){graph=domains.SelectedItem as DomainGraph;if(graph!=null){archive.CurrentDomainId=graph.Id;archive.RememberGraphTopic(graph.Id);}selected=graph!=null&&graph.Nodes.Count>0?graph.Nodes[0].Id:"";search.Clear();Zoom(1);PrepareArchitecture();Populate();Rebuild();}};
    search.TextChanged+=delegate{if(!refreshing){searchTimer.Stop();searchTimer.Start();}};searchTimer.Tick+=delegate{searchTimer.Stop();Rebuild();};
    viewport.PreviewMouseWheel+=delegate(object sender,MouseWheelEventArgs e){var at=e.GetPosition(viewport);double x=(viewport.HorizontalOffset+at.X)/scale.ScaleX,y=(viewport.VerticalOffset+at.Y)/scale.ScaleY;Zoom(scale.ScaleX*(e.Delta>0?1.15:1/1.15));canvas.UpdateLayout();viewport.ScrollToHorizontalOffset(Math.Max(0,x*scale.ScaleX-at.X));viewport.ScrollToVerticalOffset(Math.Max(0,y*scale.ScaleY-at.Y));e.Handled=true;};
    viewport.PreviewMouseLeftButtonDown+=delegate(object sender,MouseButtonEventArgs e){if(!GraphBackground(e.OriginalSource as DependencyObject))return;panning=true;panStart=e.GetPosition(viewport);panX=viewport.HorizontalOffset;panY=viewport.VerticalOffset;viewport.CaptureMouse();e.Handled=true;};
@@ -63,7 +63,7 @@ namespace ElymsPet {
   void Refresh(){
    if(disposed)return;status.Text=archive.Status;manualEdit.IsEnabled=!archive.Busy&&Selected()!=null;addNode.IsEnabled=!archive.Busy&&graph!=null;if(revision==archive.ProfileRevision&&slotId==archive.Slot.Id)return;
    bool changed=slotId!=archive.Slot.Id;slotId=archive.Slot.Id;revision=archive.ProfileRevision;
-   string id=changed?"":ActiveDomain;var list=DomainKnowledge.List(archive.Slot);refreshing=true;domains.ItemsSource=list;graph=list.Find(delegate(DomainGraph g){return g.Id==id;})??(list.Count>0?list[0]:null);domains.SelectedItem=graph;archive.CurrentDomainId=ActiveDomain;
+   string id=changed?"":ActiveDomain;var list=DomainKnowledge.List(archive.Slot);refreshing=true;domains.ItemsSource=list;graph=archive.SelectGraphTopic(list,id);domains.SelectedItem=graph;archive.CurrentDomainId=ActiveDomain;
    if(changed){selected=graph!=null&&graph.Nodes.Count>0?graph.Nodes[0].Id:"";search.Clear();Zoom(1);}refreshing=false;PrepareArchitecture();Populate();Rebuild();
   }
   DomainNode Selected(){return graph==null?null:graph.Nodes.Find(delegate(DomainNode n){return n.Id==selected;})??SingleModuleNode(SelectedModule());}

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.Serialization;
 using System.Text;
@@ -63,6 +63,19 @@ namespace ElymsPet {
      var final=NodeReadingGuide.Complete(api,key.Key,url,model,new[]{system,request,new ChatTurn("assistant",GraphEditing.Json(draft)),new ChatTurn("user","审读并修订：是否解释了原文核心术语而非仅换成大白话？每一步是否逐字引用原文，并说清对应函数、语句及数据流？未读到的实现必须标明未定位。保留原英文拼写和必要中文术语，只返回最终 JSON。")});
      var guide=NodeReadingGuide.Parse(final);string missing=NodeReadingGuide.MissingTerms(guide,required);
      if(missing.Length>0){final=ArchiveCompletion.Complete(api,key.Key,url,model,new[]{system,request,new ChatTurn("assistant",GraphEditing.Json(guide)),new ChatTurn("user","缺少以下独立术语条目："+missing+"。补齐解释，并保留流程对照及逐字原文；返回完整 JSON。")},16384,0.1,true);guide=NodeReadingGuide.Parse(final);if(NodeReadingGuide.MissingTerms(guide,required).Length>0)throw new InvalidOperationException("核心术语翻译不完整，已有翻译保留，请重试。");}
+     var fixedGuide=guide;
+     guide=FlowReaderReview.Run(source.Title,guide,g=>{
+      var visible=new StringBuilder(source.Title+"\n");foreach(var term in g.Terms)visible.Append(term.Term).Append("：").Append(term.Meaning).Append("\n");foreach(var step in g.Steps)visible.Append(step.Original).Append("\n").Append(step.Explanation).Append("\n");return visible.ToString();
+     },r=>{
+      var revised=NodeReadingGuide.Parse(r);
+      if(revised.Terms.Count!=fixedGuide.Terms.Count||revised.Steps.Count!=fixedGuide.Steps.Count)throw new InvalidOperationException("阅读修订改变了流程结构，原内容保留。");
+      for(int i=0;i<revised.Terms.Count;i++)if(revised.Terms[i].Term!=fixedGuide.Terms[i].Term)throw new InvalidOperationException("阅读修订改变了术语名称，原内容保留。");
+      for(int i=0;i<revised.Steps.Count;i++)if(revised.Steps[i].Original!=fixedGuide.Steps[i].Original||revised.Steps[i].CodeUrl!=fixedGuide.Steps[i].CodeUrl)throw new InvalidOperationException("阅读修订改变了原文或来源，原内容保留。");
+      return revised;
+     },new[]{system,request},child=>FlowReaderReview.CompleteReader(api,key.Key,url,model,child),author=>FlowReaderReview.CompleteAuthor(api,key.Key,url,model,author),
+      "完整 Terms、Steps JSON；只修改 Meaning 和 Explanation，保留 Term、Original、CodeUrl 和数组顺序。",()=>work.IsDisposed,
+      message=>sourceScheduler.Post(delegate{if(!work.IsDisposed&&busy){status=message;Raise();}}));
+     final.Text=GraphEditing.Json(guide);
      foreach(var step in guide.Steps){if(!(source.Summary??"").Contains(step.Original)&&!(source.Approach??"").Contains(step.Original))throw new InvalidOperationException("流程对照没有准确引用原文，未保存，请重试。");if(!string.IsNullOrEmpty(step.CodeUrl)&&!NodeReadingGuide.IsReadLocation(step.CodeUrl,evidence,allowed))throw new InvalidOperationException("流程引用了未读取的源码行，未保存。");}return final;
     }catch(Exception ex){return new ChatOutcome{Ok=false,Error=ex.Message};}
    },delegate(ChatOutcome result){

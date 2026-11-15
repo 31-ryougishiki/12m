@@ -1,0 +1,137 @@
+FILE vllm-ascend/vllm_ascend/platform.py @ 3649b8ff7fd69e707db2c634073d2b4c40eadf15
+L1263:             )
+L1264:         if scheduler_extension_config.profiling_chunk_config.enabled:
+L1265:             raise ValueError("DyntraLB cannot be used with profiling_chunk_config.")
+L1266: 
+L1267:     # recompute_scheduler_enable: only supported on PD-disaggregated D nodes
+L1268:     if scheduler_extension_config.recompute_scheduler_enable:
+L1269:         kv_transfer_config = vllm_config.kv_transfer_config
+L1270:         kv_role = getattr(kv_transfer_config, "kv_role", None)
+L1271:         if kv_role == "kv_producer":
+L1272:             logger.warning(
+L1273:                 "recompute_scheduler_enable is ignored on PD-disaggregated P nodes "
+L1274:                 "(kv_role='kv_producer') and will be deprecated on P nodes in a future release. "
+L1275:                 "Please remove it from P-node configs and keep it only on PD-disaggregated D nodes "
+L1276:                 "(kv_role='kv_consumer')."
+L1277:             )
+L1278:             # Write the fix back into vllm_config.additional_config so worker
+L1279:             # processes (which re-create AscendConfig) observe recompute disabled.
+L1280:             additional_scheduler_config = additional_config.get("scheduler_config")
+L1281:             if additional_scheduler_config is None:
+L1282:                 additional_scheduler_config = {}
+L1283:                 additional_config["scheduler_config"] = additional_scheduler_config
+L1284:             additional_scheduler_config["recompute_scheduler_enable"] = False
+L1285:         elif kv_transfer_config is None or kv_role != "kv_consumer":
+L1286:             raise ValueError(
+L1287:                 "recompute_scheduler_enable can only be enabled on PD-disaggregated D nodes "
+L1288:                 f"(kv_role='kv_consumer', but got kv_role={kv_role!r}), and is not supported in PD-mixed mode."
+L1289:             )
+L1290:         else:
+L1291:             async_scheduling = vllm_config.scheduler_config.async_scheduling
+L1292:             recompute_scheduler_config = RecomputeSchedulerConfig.initialize_from_config(vllm_config)
+L1293:             recompute_scheduler_config.scheduler_cls = _get_recompute_scheduler_cls(
+L1294:                 async_scheduling=async_scheduling,
+L1295:                 dyntra_lb_enabled=dyntra_lb_config.enabled,
+L1296:             )
+L1297:             vllm_config.scheduler_config = recompute_scheduler_config
+L1298: 
+L1299:     # Checked here, not in AscendConfig: MultiConnector children re-validate the config
+L1300:     # with per-child copies that cannot see sibling connectors.
+L1301:     kv_transfer_config = vllm_config.kv_transfer_config
+L1302:     offload_missing = kv_transfer_config is None or not kv_transfer_config.has_connector("PreemptOffloadConnector")
+L1303:     # Only a real split (size > 1) needs the offload guarantee, mirroring the runner gate.
+L1304:     ftpc = ascend_config.finegrained_tp_config
+L1305:     if offload_missing and (ftpc.oproj_tensor_parallel_size > 1 or ftpc.mlp_tensor_parallel_size > 1):
+L1306:         raise AssertionError(
+
+FILE vllm-ascend/vllm_ascend/distributed/kv_transfer/__init__.py @ 3649b8ff7fd69e707db2c634073d2b4c40eadf15
+L78:         "MultiConnector", "vllm_ascend.distributed.kv_transfer.ascend_multi_connector", "AscendMultiConnector"
+L79:     )
+L80: 
+L81:     KVConnectorFactory.register_connector(
+L82:         "MooncakeConnectorV1", "vllm_ascend.distributed.kv_transfer.kv_p2p.mooncake_connector", "MooncakeConnector"
+L83:     )
+L84: 
+L85:     KVConnectorFactory.register_connector(
+L86:         "MooncakeD2RHConnectorV1",
+L87:         "vllm_ascend.distributed.kv_transfer.kv_p2p.mooncake_d2rh_connector",
+L88:         "MooncakeD2RHConnectorV1",
+L89:     )
+L90: 
+L91:     KVConnectorFactory.register_connector(
+L92:         "MooncakeConnectorV2",
+L93:         "vllm_ascend.distributed.kv_transfer.kv_p2p.mooncake.connector",
+L94:         "MooncakeConnector",
+L95:     )
+L96: 
+L97:     KVConnectorFactory.register_connector(
+L98:         "MooncakePullConnector",
+L99:         "vllm_ascend.distributed.kv_transfer.kv_p2p.mooncake.connector",
+L100:         "MooncakePullConnector",
+L101:     )
+L102: 
+L103:     KVConnectorFactory.register_connector(
+L104:         "MooncakePushConnector",
+L105:         "vllm_ascend.distributed.kv_transfer.kv_p2p.mooncake.connector",
+L106:         "MooncakePushConnector",
+L107:     )
+L108: 
+L109:     KVConnectorFactory.register_connector(
+L110:         "MooncakeHybridConnector",
+L111:         "vllm_ascend.distributed.kv_transfer.kv_p2p.mooncake_hybrid_connector",
+L112:         "MooncakeConnector",
+L113:     )
+L114: 
+L115:     KVConnectorFactory.register_connector(
+L116:         "MooncakeConnectorStoreV1",
+L117:         "vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.ascend_store_connector",
+L118:         "AscendStoreConnector",
+L119:     )
+L120: 
+L121:     KVConnectorFactory.register_connector(
+
+FILE vllm-ascend/vllm_ascend/ascend_config.py @ 3649b8ff7fd69e707db2c634073d2b4c40eadf15
+L770:         global _MEGA_MOE_SUPPORTED
+L771:         if self.enable_fused_mc2 in (0, 1):
+L772:             # When enable_fused_mc2=1, roll back to dispatch_ffn_combine.
+L773:             _MEGA_MOE_SUPPORTED = False
+L774:         elif self.enable_fused_mc2 in (2, 3):
+L775:             # =2: MegaMoe with the shared expert kept separate; =3: MegaMoe
+L776:             # with the shared expert fused into the operator.
+L777:             self.megamoe_shared_expert_fusion = self.enable_fused_mc2 == 3
+L778:             _MEGA_MOE_SUPPORTED = importlib.util.find_spec("cann_ops_transformer") is not None
+L779:             if self.enable_fused_mc2 == 3 and not _MEGA_MOE_SUPPORTED:
+L780:                 logger.warning_once(
+L781:                     "enable_fused_mc2=3 requires the cann_ops_transformer package; "
+L782:                     "MegaMoe (and its shared-expert fusion) will be disabled."
+L783:                 )
+L784:             self.enable_fused_mc2 = 1
+L785:         else:
+L786:             raise ValueError(
+L787:                 "enable_fused_mc2 must be one of 0, 1, 2 (MegaMoE) or 3 "
+L788:                 f"(MegaMoE + shared-expert fusion); got {self.enable_fused_mc2}"
+L789:             )
+L790:         return self
+L791: 
+L792:     # ---- derivations + cross-config downgrades/mutex ----
+L793:     # Business validation: invoked explicitly by init_ascend_config (NOT a
+L794:     # pydantic after-validator). Preserves the original __init__ ordering —
+L795:     # multi-step downgrades are order-dependent (e.g. profiling_chunk reads
+L796:     # the max_num_batched_tokens that sequence-parallel writeback corrected).
+L797:     def derive_and_validate(self, vllm_config: VllmConfig) -> AscendConfig:
+L798:         vc = vllm_config
+L799:         if self.shared_engram is not None and self.shared_engram.backend in ("a2", "a5"):
+L800:             if getattr(vc, "shutdown_timeout", 0) <= 0:
+L801:                 raise ValueError("shared_engram requires --shutdown-timeout > 0 to retire reader leases")
+L802:             os.environ.setdefault("VLLM_WORKER_SHUTDOWN_TIMEOUT_SECONDS", "120")
+L803:         engram_config = getattr(vc, "engram_config", None)
+L804:         if self.shared_engram is not None and self.shared_engram.backend == "a3":
+L805:             if not vc.use_v2_model_runner:
+L806:                 raise ValueError("shared_engram requires Model Runner V2")
+L807:             if not engram_config or not engram_config.cpu_offload:
+L808:                 raise ValueError("shared_engram requires Engram cpu_offload")
+L809:             if vc.load_config.load_format == "dummy" or vc.model_config.enable_sleep_mode:
+L810:                 raise ValueError("Shared host Engram does not support dummy loading or sleep mode")
+L811:         if (
+L812:             engram_config is not None
+L813:             and getattr(engram_config, "cpu_offload", False)

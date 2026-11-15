@@ -94,14 +94,17 @@ namespace ElymsPet {
   public static string PromptContext(PetState state) {
    if(state==null||!state.DshEnabled) return "DSH 委托已在设置里关闭。";
    string error;var handshake=ReadHandshake(out error);
-   if(handshake==null) return "现在没有检测到 DSH 工作台（"+error+"）。如果用户要求实际动手，先说明需要打开 DSH。";
+   if(handshake==null) return "DSH 工作台尚未连接；提交任务时宿主会自动启动本机 DSH 并等待桥接就绪。不能提前声称任务已执行。";
    return "检测到 DSH 工作台入口，工作区："+handshake.workspace+"。提交时会检查连接，不能仅凭入口断言任务已经执行。";
   }
   public static string Clip(string text,int max) {
    text=(text??"").Trim();
    return text.Length<=max?text:text.Substring(0,max)+"…";
   }
-  public static DshJob Start(string task,string permission,string title,DshKnowledgeManifest knowledge=null) {
+  public static DshJob Start(string task,string permission,string title,DshKnowledgeManifest knowledge=null,Action<string> progress=null,Func<bool> cancelled=null) {
+   var ownerCancelled=cancelled;cancelled=()=>NetworkCancellation.IsCancellationRequested||(ownerCancelled!=null&&ownerCancelled());
+   var ready=DshStartup.Ensure(progress,cancelled);if(!ready.Ok)return ErrorJob(ready.Error,task,permission);
+   if(cancelled())return ErrorJob("DSH 任务已取消，未提交。",task,permission);
    string error;var handshake=ReadHandshake(out error);
    if(handshake==null) return ErrorJob("DSH 桥接没有运行："+error,task,permission);
    var request=new DshTaskRequest {prompt=task,permission=permission,cwd=handshake.workspace,title=title??"",knowledge=knowledge};
@@ -141,11 +144,11 @@ namespace ElymsPet {
    string response;int status;string requestError;
    return Send("POST",BaseUrl(handshake)+"/task/"+Uri.EscapeDataString(jobId)+"/cancel",handshake.token,"{}",15000,out response,out status,out requestError);
   }
-  public static DshHealthResult Health() {
+  public static DshHealthResult Health(int timeoutMs=5000) {
    string error;var handshake=ReadHandshake(out error);
    if(handshake==null) return new DshHealthResult {Ok=false,Error="桥接文件不可用："+error};
    string response;int status;string requestError;
-   if(!Send("GET",BaseUrl(handshake)+"/health",handshake.token,null,5000,out response,out status,out requestError)) {
+   if(!Send("GET",BaseUrl(handshake)+"/health",handshake.token,null,timeoutMs,out response,out status,out requestError)) {
     return new DshHealthResult {Ok=false,Error=Describe(status,requestError)};
    }
    try {
@@ -155,6 +158,7 @@ namespace ElymsPet {
    } catch(Exception e) {return new DshHealthResult {Ok=false,Error="DSH 健康检查格式不对："+e.Message};}
   }
   public static string BrowserUrl() {
+   var ready=DshStartup.Ensure();if(!ready.Ok)throw new IOException(ready.Error);
    string error;var handshake=ReadHandshake(out error);
    if(handshake==null)throw new IOException("DSH 桥接没有运行，请先启动 DSH。");
    string response;int status;
@@ -181,6 +185,7 @@ namespace ElymsPet {
    response="";status=0;error="";
    try {
     var request=(HttpWebRequest)WebRequest.Create(url);
+    NetworkCancellation.Track(request);
     request.Method=method;request.Timeout=timeoutMs;request.ReadWriteTimeout=timeoutMs;request.KeepAlive=false;
     request.Accept="application/json";
     request.Headers[HttpRequestHeader.Authorization]="Bearer "+token;

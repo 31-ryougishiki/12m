@@ -65,6 +65,29 @@ ControlWindow → CompanionStatusViewModel
 
 发布脚本从源码插件复制，不使用可能过期的 `dist/` 插件副本。默认不替换正在运行的 EXE、不自动安装插件。便携包带独立测试程序，`--self-test` 兼容入口仍可使用。
 
+## 数据保存分工
+
+本机数据根目录为 `%LOCALAPPDATA%/ElymsDesktopPet/`。现有格式继续保留；新增讲解保存独立于图谱和诊断日志，避免长文本参与每次图谱编辑、修订摘要及云同步。
+
+| 内容 | 当前保存位置 | 用途与恢复方式 |
+| --- | --- | --- |
+| 桌宠状态、显示/功能设置、便签、专注计时、API配置 | `settings.json` | 用户设置；API密钥使用当前 Windows 用户的 DPAPI 保存，内存解密供调用 |
+| 聊天原话和回答 | `chat-history.json` | 聊天历史和上下文，不存模型思考过程 |
+| 长期事实、偏好、习惯等记忆 | `memories.json` | 与原始聊天分开维护的记忆条目 |
+| 存档、访谈、画像、经验、工作流程、资料卡、知识图谱 | `archives/archives.json` | 主要业务数据；节点的介绍、代码、来源、学习目标、已保存复述、术语/流程翻译都随存档保存 |
+| 最近一次完整节点讲解 | `learning/explanations/<存档哈希>/<专题哈希>/<节点哈希>/latest.json` | 自动恢复阅读；保存正文、文末答疑、三轮审阅、逐句代码对应及固定提交的上下文原文、请求标识、时间和资料/规则版本；失败不覆盖成功记录 |
+| 每次讲解/复述反馈的生成记录 | `repository-explanations/yyyyMMdd.jsonl` | 追加历史，用于诊断、prompt迭代及旧讲解恢复；包含失败和审阅过程，不能不加筛选就作为可用讲解 |
+| 存档导出的知识文件 | `archives/knowledge/<存档哈希>/` | `profile.md`、`workflows.md`、`episodes.md`、`changes.md`、`graph.json`、资料索引等派生文件；DSH图谱编辑请求/回执也在此目录 |
+| 自主活动记录 | `autonomy-journal.json` | 已执行/未执行活动及结果，和对话、用户存档分开 |
+| 本地仓库映射、固定提交源码副本 | `local-repositories.json`、`source-snapshots/` | 环境配置与可重建的源码快照；不是讲解正文 |
+| 最近图谱专题、插件安装状态 | `graph-view.json`、`plugins/installed.json`、`plugins/installed/` | 视图偏好、已启用插件清单及校验后的模块文件 |
+| 云同步配置、B站登录凭据 | `archive-cloud.json`、`bili-account.dat` | 本机连接配置/加密凭据；不当作学习内容迁移 |
+| DSH连接与诊断记录 | `dsh-bridge.json`、`dsh-source-research/`、`source-research/`、`graph-edit-diagnostics/`、`error.log` | 运行连接信息及诊断；握手文件可能含连接令牌，不混入业务文档或分享包 |
+
+普通 JSON 状态使用原子替换，并保留上一份 `.bak`；追加 JSONL 保留历史。讲解当前只保留一份便于读取的 `latest.json` 和上一版备份，完整历史继续留在日志中。旧日志按需补建讲解保存文件，不批量搬迁或删除原数据。切换节点、重启、查看历史不会调用模型；明确点击重新生成才产生新调用。预览与测试使用隔离存储。
+
+当前云同步包是 `ArchiveBook`，包含存档和图谱，**不包含**聊天、长期记忆、本机凭据、独立讲解保存文件和生成日志。备份完整的本地学习资料时需同时保留 `archives/`、`learning/` 和 `repository-explanations/`。未保存的输入草稿与运行中的请求仍是临时状态；不因这次增加讲解保存而承诺跨重启恢复。
+
 ## 人设与剧情维护
 
 `assets/persona/elyms.txt` 是所有角色生成入口的共同基准。`CharacterPersona` 只负责读取不可变的嵌入文本；`Persona` 在其后拼接本轮能力、记忆、画像和状态。B站选题与两种存档访谈共用同一基准，再追加任务格式。存档条目整理器和连通性测试不是角色对话，继续使用自己的专用提示。

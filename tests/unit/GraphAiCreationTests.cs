@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 namespace ElymsPet {
@@ -37,6 +37,6 @@ namespace ElymsPet {
   }
   public sealed class MemoryRepo:IRepository<ArchiveBook>{readonly ArchiveBook book;public bool Fail;public MemoryRepo(ArchiveBook value){book=value;}public ArchiveBook Load(){return book;}public bool Save(ArchiveBook value){return !Fail;}public string LastError{get{return "simulated failure";}}}
   public sealed class QueueScheduler:IWorkScheduler{readonly Queue<Action> jobs=new Queue<Action>();public void Queue(Action action){jobs.Enqueue(action);}public void Post(Action action){action();}public void Run(){while(jobs.Count>0)jobs.Dequeue()();}}
-  public sealed class FakeApi:IArchiveApi{public string Result,Prompt;public bool Truncated,RequiresSource;public int Calls,PlanCalls;public readonly Queue<string> Results=new Queue<string>();public ChatOutcome Complete(string key,string url,string model,bool thinking,ChatTurn[] turns,int timeout,int tokens,double temperature){Calls++;Prompt=turns[0].Content;if(Prompt==DshSourceResearch.EditPlanRules){PlanCalls++;return new ChatOutcome{Ok=true,Text=GraphEditing.Json(new DshEditPlan{RequiresSource=RequiresSource,Question="核实实现和调用方"})};}return new ChatOutcome{Ok=true,Text=Results.Count>0?Results.Dequeue():Result,Truncated=Truncated};}public WebOutcome Search(string a,string b,string c){throw new Exception("No network in test");}public WebOutcome Fetch(string a,string b,string c){throw new Exception("No network in test");}}
+  public sealed class FakeApi:IArchiveApi{public string Result,Prompt;public bool Truncated,RequiresSource;public int Calls,PlanCalls,ReaderCalls,FailReaderAt;public readonly Queue<string> Results=new Queue<string>();public ChatOutcome Complete(string key,string url,string model,bool thinking,ChatTurn[] turns,int timeout,int tokens,double temperature){Calls++;Prompt=turns[0].Content;if(Prompt==FlowReaderReview.ReaderRules){ReaderCalls++;return new ChatOutcome{Ok=true,Text="{\"Questions\":[],\"Decisions\":[]}",Truncated=ReaderCalls==FailReaderAt};}if(Array.Exists(turns,t=>t.Role=="system"&&t.Content.StartsWith(FlowReaderReview.RevisionRules)))return new ChatOutcome{Ok=true,Text=turns[turns.Length-2].Content};if(Prompt==DshSourceResearch.EditPlanRules){PlanCalls++;return new ChatOutcome{Ok=true,Text=GraphEditing.Json(new DshEditPlan{RequiresSource=RequiresSource,Question="核实实现和调用方"})};}return new ChatOutcome{Ok=true,Text=Results.Count>0?Results.Dequeue():Result,Truncated=Truncated};}public WebOutcome Search(string a,string b,string c){throw new Exception("No network in test");}public WebOutcome Fetch(string a,string b,string c){throw new Exception("No network in test");}}
  }
 }

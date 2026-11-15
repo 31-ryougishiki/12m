@@ -30,6 +30,10 @@ namespace ElymsPet {
     foreach(var view in new[]{main,floating})Check(!Field<StackPanel>(view,"stack").Children.Contains(Field<Border>(view,"activity")),"failure clears the transient thinking indicator");
     Call(chat,"ReportSourceProgress","迟到的进度");Pump();Check(chat.LastHint=="测试失败状态","late progress cannot revive a finished request");
     typeof(PetWindow).GetField("forced",Private).SetValue(pet,-1);Call(pet,"Tick",null,EventArgs.Empty);Check(pet.Art.Frame!=6,"pet leaves thinking state when work ends");
+    busy.SetValue(chat,true);Call(chat,"ReportSourceProgress","等待取消的回复");Pump();
+    Check(Field<Button>(panel,"stopChat").IsEnabled&&Field<Button>(bar,"stopChat").IsEnabled,"main and floating chat expose enabled stop controls while replying");
+    Field<Button>(bar,"stopChat").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Pump();
+    Check(!chat.Busy&&!Field<Button>(panel,"stopChat").IsEnabled&&!Field<Button>(bar,"stopChat").IsEnabled,"floating stop button immediately stops the shared conversation in both windows");
    }finally{busy.SetValue(chat,false);main.SetActivity("");floating.SetActivity("");}
   }
  }

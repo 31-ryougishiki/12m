@@ -6,6 +6,7 @@ using System.Runtime.Serialization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 namespace ElymsPet {
  [DataContract] public sealed class LocalRepositoryMapping {
   [DataMember] public string Repository="",Folder="";
@@ -14,14 +15,15 @@ namespace ElymsPet {
   [DataMember] public string Editor="";
   [DataMember] public List<LocalRepositoryMapping> Repositories=new List<LocalRepositoryMapping>();
  }
- public sealed class LocalCodeTarget {public string File,Message;public int Line;public bool Exact;}
+ public sealed class LocalCodeTarget {public string File,Message;public int Line;public bool Exact,IsSnapshot;}
  public static class LocalRepository {
   public static string SettingsPath {get{return Path.Combine(Storage.Folder,"local-repositories.json");}}
   public static LocalRepositorySettings Load(){string error;var settings=JsonFile.Load<LocalRepositorySettings>(SettingsPath,out error)??new LocalRepositorySettings();if(settings.Repositories==null)settings.Repositories=new List<LocalRepositoryMapping>();return settings;}
   public static bool Save(LocalRepositorySettings settings,out string error){return JsonFile.Save(SettingsPath,settings,Storage.Folder,out error);}
   public static string Repository(string url){var match=Regex.Match(url??"",@"^https://github\.com/([\w.-]+/[\w.-]+)/blob/");return match.Success?match.Groups[1].Value:"";}
   public static string MappedFolder(LocalRepositorySettings settings,string url){var mapping=settings.Repositories.Find(delegate(LocalRepositoryMapping m){return m!=null&&string.Equals(m.Repository,Repository(url),StringComparison.OrdinalIgnoreCase);});return mapping==null?"":mapping.Folder;}
-  public static string ResolveFile(string folder,string url){
+  public static string ResolveFile(string folder,string url){return ResolvePath(folder,url,true);}
+  static string ResolvePath(string folder,string url,bool requireFile){
    if(!RepositoryLearning.PinnedCode(url))throw new InvalidDataException("需要固定提交的源码行链接。");
    if(string.IsNullOrWhiteSpace(folder)||!Path.IsPathRooted(folder)||!Directory.Exists(folder))throw new DirectoryNotFoundException("请先选择存在的本地仓库根目录。");
    var match=Regex.Match(url,@"/blob/[a-fA-F0-9]{40}/([^?#]+)#");string relative=Uri.UnescapeDataString(match.Groups[1].Value);
@@ -29,20 +31,62 @@ namespace ElymsPet {
    string root=Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)+Path.DirectorySeparatorChar;
    string file=Path.GetFullPath(Path.Combine(root,relative.Replace('/',Path.DirectorySeparatorChar)));
    if(!file.StartsWith(root,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("源码位置超出仓库目录。");
-   if(!System.IO.File.Exists(file))throw new FileNotFoundException("本地仓库中没有这个文件，请检查仓库映射："+relative);
-   for(string current=file;current!=null&&current.Length>=root.TrimEnd(Path.DirectorySeparatorChar).Length;current=Path.GetDirectoryName(current))if((System.IO.File.GetAttributes(current)&FileAttributes.ReparsePoint)!=0)throw new InvalidDataException("源码路径包含链接目录，请映射到真实仓库目录。");
+   if(requireFile&&!System.IO.File.Exists(file))throw new FileNotFoundException("本地仓库中没有这个文件，请检查仓库映射："+relative);
+   for(string current=file;current!=null&&current.Length>=root.TrimEnd(Path.DirectorySeparatorChar).Length;current=Path.GetDirectoryName(current))if((System.IO.File.Exists(current)||Directory.Exists(current))&&(System.IO.File.GetAttributes(current)&FileAttributes.ReparsePoint)!=0)throw new InvalidDataException("源码路径包含链接目录，请映射到真实仓库目录。");
    return file;
   }
   static string Quote(string value){return "\""+value.Replace("\"","\\\"")+"\"";}
   static string GitBlob(string folder,string spec){
    try{using(var process=Process.Start(new ProcessStartInfo("git.exe","-C "+Quote(folder)+" rev-parse --verify "+Quote(spec)){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true})){if(!process.WaitForExit(2000)){process.Kill();return "";}return process.ExitCode==0?process.StandardOutput.ReadToEnd().Trim():"";}}catch{return "";}
   }
+  const int MaxSourceBytes=8*1024*1024;
+  static byte[] ReadBounded(Stream stream){
+   using(var result=new MemoryStream()){byte[] buffer=new byte[8192];int count;while((count=stream.Read(buffer,0,buffer.Length))>0){if(result.Length+count>MaxSourceBytes)throw new InvalidDataException("源码文件超过 8 MB。");result.Write(buffer,0,count);}return result.ToArray();}
+  }
+  static string BlobHash(byte[] bytes){using(var sha=SHA1.Create()){byte[] header=Encoding.ASCII.GetBytes("blob "+bytes.Length+"\0");sha.TransformBlock(header,0,header.Length,header,0);sha.TransformFinalBlock(bytes,0,bytes.Length);return BitConverter.ToString(sha.Hash).Replace("-","").ToLowerInvariant();}}
+  static byte[] ReadBlob(string folder,string hash){
+   // Read raw Git object bytes, without checkout, filters or changing the user's branch.
+   using(var process=Process.Start(new ProcessStartInfo("git.exe","-C "+Quote(folder)+" cat-file blob "+hash){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true})){
+    process.ErrorDataReceived+=delegate{};process.BeginErrorReadLine();
+    var read=Task.Factory.StartNew(delegate{return ReadBounded(process.StandardOutput.BaseStream);});
+    try{if(!read.Wait(5000)||!process.WaitForExit(2000))throw new IOException("读取来源提交超时。");if(process.ExitCode!=0)throw new IOException("本地 Git 对象不可用。");return read.Result;}
+    finally{if(!process.HasExited)process.Kill();}
+   }
+  }
+  static void CheckLine(byte[] bytes,int line){string value=new UTF8Encoding(false,true).GetString(bytes);if(value.IndexOf('\0')>=0)throw new InvalidDataException("来源文件不是可用文本。");int lines=1;foreach(char c in value)if(c=='\n')lines++;if(line>lines)throw new InvalidDataException("来源行号超出文件范围，请修正图谱中的源码链接。");}
+  public static string[] ReadPinnedLines(LocalRepositorySettings settings,string url){
+   string folder=MappedFolder(settings,url);ResolvePath(folder,url,false);
+   var match=Regex.Match(url,@"/blob/([a-fA-F0-9]{40})/([^?#]+)#L([1-9][0-9]*)");
+   string hash=GitBlob(folder,match.Groups[1].Value+":"+Uri.UnescapeDataString(match.Groups[2].Value));
+   if(!Regex.IsMatch(hash,"^[a-fA-F0-9]{40}$"))throw new InvalidDataException("指定提交的代码不可读取。");
+   byte[] bytes=ReadBlob(folder,hash);if(!string.Equals(BlobHash(bytes),hash,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("源码内容校验失败。");
+   CheckLine(bytes,int.Parse(match.Groups[3].Value));return new UTF8Encoding(false,true).GetString(bytes).Replace("\r\n","\n").Split('\n');
+  }
+  public static string[] PinnedPaths(LocalRepositorySettings settings,string url){
+   string folder=MappedFolder(settings,url);ResolvePath(folder,url,false);string commit=Regex.Match(url,@"/blob/([a-fA-F0-9]{40})/").Groups[1].Value;
+   using(var process=Process.Start(new ProcessStartInfo("git.exe","-C "+Quote(folder)+" ls-tree -r --name-only "+commit){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true})){
+    process.ErrorDataReceived+=delegate{};process.BeginErrorReadLine();var read=Task.Factory.StartNew(delegate{return ReadBounded(process.StandardOutput.BaseStream);});
+    try{if(!read.Wait(5000)||!process.WaitForExit(2000)||process.ExitCode!=0)throw new IOException("读取固定提交文件列表失败。");return Encoding.UTF8.GetString(read.Result).Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries);}
+    finally{if(!process.HasExited)process.Kill();}
+   }
+  }
+  static string Snapshot(string name,string hash,byte[] bytes){
+   string folder=Path.Combine(Storage.Folder,"source-snapshots",hash),file=Path.Combine(folder,name);
+   for(string current=file;current!=null&&current.Length>=Storage.Folder.Length;current=Path.GetDirectoryName(current))if((System.IO.File.Exists(current)||Directory.Exists(current))&&(System.IO.File.GetAttributes(current)&FileAttributes.ReparsePoint)!=0)throw new IOException("源码快照目录包含链接。");
+   Directory.CreateDirectory(folder);
+   if(System.IO.File.Exists(file)){using(var stream=System.IO.File.OpenRead(file)){if(BlobHash(ReadBounded(stream))==hash)return file;}}
+   string temp=file+"."+Guid.NewGuid().ToString("N")+".tmp";
+   try{System.IO.File.WriteAllBytes(temp,bytes);if(System.IO.File.Exists(file))System.IO.File.Replace(temp,file,null);else System.IO.File.Move(temp,file);}finally{if(System.IO.File.Exists(temp))System.IO.File.Delete(temp);}
+   return file;
+  }
   public static LocalCodeTarget Resolve(string folder,string url){
-   string file=ResolveFile(folder,url);var match=Regex.Match(url,@"/blob/([a-fA-F0-9]{40})/([^?#]+)#L([1-9][0-9]*)");int line;if(!int.TryParse(match.Groups[3].Value,out line))throw new InvalidDataException("代码行号无效。");
-   var target=new LocalCodeTarget{File=file,Line=1,Message="本地文件与来源版本不同或无法核实，已打开文件开头；准确行号请查看网页源码。"};
+   string file=ResolvePath(folder,url,false);var match=Regex.Match(url,@"/blob/([a-fA-F0-9]{40})/([^?#]+)#L([1-9][0-9]*)");int line;if(!int.TryParse(match.Groups[3].Value,out line))throw new InvalidDataException("代码行号无效。");
    string expected=GitBlob(folder,match.Groups[1].Value+":"+Uri.UnescapeDataString(match.Groups[2].Value));
-   if(Regex.IsMatch(expected,"^[a-fA-F0-9]{40}$")&&new FileInfo(file).Length<=8*1024*1024){byte[] bytes=System.IO.File.ReadAllBytes(file);using(var sha=SHA1.Create()){byte[] header=Encoding.ASCII.GetBytes("blob "+bytes.Length+"\0");sha.TransformBlock(header,0,header.Length,header,0);sha.TransformFinalBlock(bytes,0,bytes.Length);string hash=BitConverter.ToString(sha.Hash).Replace("-","");if(string.Equals(hash,expected,StringComparison.OrdinalIgnoreCase)){target.Exact=true;target.Line=line;target.Message="已定位本地源码第 "+line+" 行（文件与来源提交一致）。";}}}
-   return target;
+   if(!Regex.IsMatch(expected,"^[a-fA-F0-9]{40}$"))throw new InvalidDataException("本地 Git 中没有可核验的来源提交，请同步仓库历史后重试，或查看网页源码。");
+   expected=expected.ToLowerInvariant();
+   if(System.IO.File.Exists(file)&&new FileInfo(file).Length<=MaxSourceBytes){byte[] bytes;using(var stream=System.IO.File.OpenRead(file))bytes=ReadBounded(stream);if(BlobHash(bytes)==expected){CheckLine(bytes,line);return new LocalCodeTarget{File=file,Line=line,Exact=true,Message="已定位本地源码第 "+line+" 行（文件与来源提交一致）。"};}}
+   byte[] source=ReadBlob(folder,expected);if(BlobHash(source)!=expected)throw new InvalidDataException("来源快照校验失败，请查看网页源码。");CheckLine(source,line);
+   return new LocalCodeTarget{File=Snapshot(Path.GetFileName(file),expected,source),Line=line,Exact=true,IsSnapshot=true,Message="已打开来源提交 "+match.Groups[1].Value.Substring(0,12)+" 的源码快照，第 "+line+" 行（内容已核验；当前工作目录未修改）。"};
   }
   public static string ReadContext(LocalRepositorySettings settings,string url){
    string prefix="来源："+url+"\n";

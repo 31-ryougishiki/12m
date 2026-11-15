@@ -31,13 +31,13 @@ namespace ElymsPet {
   public DshJob[] History {get {return history.ToArray();}}
   public bool Busy {get {return Current!=null&&Current.Busy;}}
   public string HandshakePath {get {return DshApi.HandshakePath;}}
-  public bool CanRun {get {string error;return PluginAccess.Enabled(state,"dsh")&&state.DshEnabled&&DshApi.ReadHandshake(out error)!=null;}}
+  public bool CanRun {get {return PluginAccess.Enabled(state,"dsh")&&state.DshEnabled;}}
   public string StatusLine {
    get {
     if(!PluginAccess.Enabled(state,"dsh"))return "DSH 插件未安装或未启用。";
     if(!state.DshEnabled) return "○ DSH 委托已关闭";
     string error;var handshake=DshApi.ReadHandshake(out error);
-    if(handshake==null) return "○ DSH 桥接未运行（打开 DSH 后可用）";
+    if(handshake==null) return "○ DSH 未运行，提交任务时会自动启动";
     return "检测到 DSH 桥接 · 工作区 "+handshake.workspace;
    }
   }
@@ -49,11 +49,10 @@ namespace ElymsPet {
    if(task.Length==0) return false;
    if(!state.DshEnabled) {SetImmediateError("DSH 委托已在设置里关闭。");return false;}
    string error;var handshake=DshApi.ReadHandshake(out error);
-   if(handshake==null) {SetImmediateError("DSH 桥接没有运行："+error);return false;}
    DshKnowledgeManifest knowledge;
    try {knowledge=prepareKnowledge==null?null:prepareKnowledge();}
    catch(Exception e){SetImmediateError("准备存档资料失败，任务未提交："+e.Message);return false;}
-   Current=new DshJob {Status="starting",Task=task,Title=title??"",Permission=permission??"workspace-write",Cwd=handshake.workspace,UpdatedAt=DateTime.Now};
+   Current=new DshJob {Status="starting",Task=task,Title=title??"",Permission=permission??"workspace-write",Cwd=handshake==null?"":handshake.workspace,Progress="正在连接 DSH；未运行时会自动启动…",UpdatedAt=DateTime.Now};
    Raise();
    work.Run(delegate {
     return DshApi.Start(task,permission,DshApi.Clip(title,80),knowledge);
@@ -66,7 +65,8 @@ namespace ElymsPet {
    return true;
   }
   public void Cancel() {
-   if(Current==null||!Current.Busy||Current.Id.Length==0) return;
+   if(Current==null||!Current.Busy) return;
+   if(Current.Id.Length==0){work.CancelPending();Current.Status="cancelled";Finish(Current);return;}
    string id=Current.Id;
    work.Run(delegate {return DshApi.Cancel(id);},delegate(bool ok) {
     if(ok&&Current!=null&&Current.Id==id) {Current.Status="cancelling";Current.UpdatedAt=DateTime.Now;Raise();}

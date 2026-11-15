@@ -21,6 +21,7 @@ namespace ElymsPet {
   readonly TextBlock headerStatus,metaText,inputPlaceholder,archiveSlotText,chatLabel,archiveLabel,hintText,questionText;
   readonly ChatView view,archiveView;
   readonly SendButton send;
+  readonly Button stopChat,retryChat;
   readonly Path historyIcon;
   readonly Border historyButton,chatPill,archivePill,questionBanner;
   bool showHistory,placed,userMoved,archiveMode;
@@ -107,7 +108,7 @@ namespace ElymsPet {
     archive.AskNext();
     e.Handled=true;
    };
-   view=new ChatView(true){Margin=new Thickness(14,0,12,8),MaxHeight=268};
+   view=new ChatView(true,chat.Resend){Margin=new Thickness(14,0,12,8),MaxHeight=268};
    view.Visibility=showHistory?Visibility.Visible:Visibility.Collapsed;
    body.Children.Add(view);Grid.SetRow(view,4);
    archiveView=new ChatView(true){Margin=new Thickness(14,0,12,8),MaxHeight=268,Visibility=Visibility.Collapsed};
@@ -131,7 +132,9 @@ namespace ElymsPet {
    send=new SendButton(delegate {SendNow();},36){Margin=new Thickness(5,4,3,4)};
    inputGrid.Children.Add(send);Grid.SetColumn(send,1);
    inputHost.Child=inputGrid;
-   body.Children.Add(inputHost);Grid.SetRow(inputHost,5);
+   stopChat=Ui.Button("停止回复",chat.Stop,false);retryChat=Ui.Button("重发上一条",chat.ResendLast,false);
+   var actions=Ui.Row(stopChat,retryChat);actions.Margin=new Thickness(14,0,14,0);
+   var composer=Ui.Stack(inputHost,actions);body.Children.Add(composer);Grid.SetRow(composer,5);
    var footer=new Grid{Margin=new Thickness(18,7,16,12)};
    footer.ColumnDefinitions.Add(new ColumnDefinition());
    footer.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
@@ -281,6 +284,8 @@ namespace ElymsPet {
    input.Focus();
   }
   void UpdateSend() {
+   stopChat.Visibility=retryChat.Visibility=archiveMode?Visibility.Collapsed:Visibility.Visible;
+   stopChat.IsEnabled=chat.CanStop;retryChat.IsEnabled=chat.CanResend;
    if(archiveMode)send.Ready=!archive.Busy&&!archive.Slot.Paused&&archive.HasQuestion&&(input.Text??"").Trim().Length>0;
    else send.Ready=!chat.Busy&&(input.Text??"").Trim().Length>0;
   }

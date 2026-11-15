@@ -28,10 +28,13 @@ namespace ElymsPet {
     ArchiveCloudFlowTests.Run(root);
     ArchiveKnowledgeTests.Run(root);
     ArchiveLearningTests.Run(root);
-    KnowledgeGraphTests.Run(root);DomainGraphTests.Run(root);RepositoryLearningTests.Run();RepositoryArchitectureTests.Run();GraphAiCreationTests.Run(root);GraphReadingTests.Run(root);ModuleHierarchyTests.Run(root);ReadableExplanationTests.Run(root);NodeReadingGuideTests.Run(root);LocalRepositoryTests.Run(root);
+    KnowledgeGraphTests.Run(root);DomainGraphTests.Run(root);RepositoryLearningTests.Run();RepositoryArchitectureTests.Run();GraphAiCreationTests.Run(root);GraphReadingTests.Run(root);ModuleHierarchyTests.Run(root);ReadableExplanationTests.Run(root);FlowReaderReviewTests.Run(root);NodeReadingGuideTests.Run(root);LocalRepositoryTests.Run(root);
     ArchiveResearchTests.Run(root);
     SourceResearchTests.Run(root);
     DshSourceResearchTests.Run(root);
+    DshStartupTests.Run();
+    ChatControlsTests.Run(root);
+    MessageTextTests.Run(root);
     DshGraphEditingTests.Run(root);
     AssessmentTests.Run(root);
     ThinkingTests.Run();
@@ -143,8 +146,8 @@ namespace ElymsPet {
    Check(stack.Children.Count==1,"chat view contains one message block");
    var block=(StackPanel)stack.Children[0];
    var bubble=(Border)block.Children[1];
-   var text=bubble.Child as TextBox;
-   Check(text!=null&&text.IsReadOnly&&text.Text=="可以选中的回复","chat message uses selectable read-only text");
+   var text=bubble.Child as MessageText;
+   Check(text!=null&&text.IsReadOnly&&text.OriginalText=="可以选中的回复","chat message uses selectable read-only text");
    Check(text.ContextMenu!=null&&text.ContextMenu.Items.Count>=3,"chat message exposes copy menu");
    var input=ChatInput.Field();
    Check(input.ContextMenu!=null&&input.ContextMenu.Items.Count>=4,"chat input exposes copy menu");

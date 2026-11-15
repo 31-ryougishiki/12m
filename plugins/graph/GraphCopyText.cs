@@ -51,7 +51,7 @@ namespace ElymsPet {
    root.PreviewMouseMove+=delegate(object s,MouseEventArgs e){if(pending==null||e.LeftButton!=MouseButtonState.Pressed)return;var p=e.GetPosition(root);if(!dragging&&(Math.Abs(p.X-down.X)>SystemParameters.MinimumHorizontalDragDistance||Math.Abs(p.Y-down.Y)>SystemParameters.MinimumVerticalDragDistance)){dragging=true;if(interactive)pending.Begin(root.TranslatePoint(down,pending));root.CaptureMouse();}if(dragging){pending.Extend(e.GetPosition(pending));e.Handled=true;}};
    root.PreviewMouseLeftButtonUp+=delegate(object s,MouseButtonEventArgs e){if(dragging){e.Handled=true;root.ReleaseMouseCapture();}pending=null;dragging=false;};
    // Template-generated captions (tabs, expanders, buttons) can also be copied.
-   root.PreviewMouseRightButtonDown+=delegate(object s,MouseButtonEventArgs e){var source=e.OriginalSource as DependencyObject;if(Ancestor<TextBox>(source)!=null||Ancestor<GraphCopyText>(source)!=null)return;var text=Ancestor<TextBlock>(source);if(text==null)return;var menu=new ContextMenu{PlacementTarget=text};var copy=new MenuItem{Header="复制文字"};copy.Click+=delegate{Copy(new TextRange(text.ContentStart,text.ContentEnd).Text);};menu.Items.Add(copy);menu.IsOpen=true;e.Handled=true;};
+   root.PreviewMouseRightButtonDown+=delegate(object s,MouseButtonEventArgs e){var source=e.OriginalSource as DependencyObject;if(Ancestor<TextBoxBase>(source)!=null||Ancestor<GraphCopyText>(source)!=null)return;var text=Ancestor<TextBlock>(source);if(text==null)return;var menu=new ContextMenu{PlacementTarget=text};var copy=new MenuItem{Header="复制文字"};copy.Click+=delegate{Copy(new TextRange(text.ContentStart,text.ContentEnd).Text);};menu.Items.Add(copy);menu.IsOpen=true;e.Handled=true;};
   }
  }
 }

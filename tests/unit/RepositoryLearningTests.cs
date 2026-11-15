@@ -4,6 +4,10 @@ namespace ElymsPet {
  static class RepositoryLearningTests {
   static void Check(bool ok,string name){if(!ok)throw new Exception("Repository learning: "+name);Console.WriteLine("PASS learning: "+name);}
   public static void Run(){
+   RepositoryExplanationReviewTests.Run();
+   RepositoryExplanationCompletionTests.Run();
+   RepositoryExplanationCodeTests.Run();
+   RepositoryExplanationStoreTests.Run();
    var example=RepositoryLearningExample.Create();var node=example.Nodes[0];
    foreach(var n in example.Nodes)Check(RepositoryLearning.PinnedCode(n.Learning.CodeUrl)&&n.Code.Length>0,"example has pinned line and actual excerpt: "+n.Id);
    Check(!RepositoryLearning.PinnedCode("https://github.com/a/b/blob/main/a.py#L2"),"moving branch is not pinned evidence");
@@ -25,6 +29,19 @@ namespace ElymsPet {
    node.Learning.Reflection="我的解释";var clone=DomainKnowledge.Clone(example);Check(clone.Nodes[0].Learning.Reflection=="我的解释","learning survives persistence roundtrip");
    Check(RepositoryLearning.Prompt(example,node,"反馈").Contains("我的解释")&&RepositoryLearning.Prompt(example,node,"反馈").Contains(node.Learning.CodeUrl),"tutor gets reflection and pinned code");
    Check(RepositoryLearning.Validate(new NodeLearning{CodeUrl="https://github.com/a/b/blob/main/x#L1"}).Length>0,"invalid code anchor rejected on save");
+   string logRoot=System.IO.Path.Combine(System.IO.Path.GetTempPath(),"elyms-explanation-"+Guid.NewGuid().ToString("N"));
+   try{
+    var log=new RepositoryExplanationLog{NodeTitle="等待请求",Prompt="解释这个节点",Model="test"};
+    var answer=new ChatOutcome{Ok=true,Text="第一段\n第二段：中文与 `code`",Truncated=true,FinishReason="length"};
+    Check(log.Save(logRoot,answer,""),"explanation is persisted");
+    Check(log.Save(logRoot,ChatOutcome.Fail("错误 secret-test-key","",500,1),"secret-test-key"),"failed explanation is appended");
+    string[] lines=System.IO.File.ReadAllLines(System.IO.Directory.GetFiles(System.IO.Path.Combine(logRoot,"repository-explanations"))[0]);
+    var restored=GraphEditing.Parse<RepositoryExplanationLog>(lines[0]);
+    Check(lines.Length==2&&restored.Output==answer.Text&&restored.Truncated&&restored.DisplayText==RepositoryExplanationLog.Format(answer),"multiline original and displayed truncated answer survive JSONL roundtrip");
+    Check(!lines[1].Contains("secret-test-key")&&!GraphEditing.Parse<RepositoryExplanationLog>(lines[1]).Ok,"failure is marked and credential is redacted");
+    string blocked=System.IO.Path.Combine(logRoot,"blocked");System.IO.File.WriteAllText(blocked,"file");
+    Check(!log.Save(blocked,answer,""),"logging failure is reported without throwing away answer");
+   }finally{if(System.IO.Directory.Exists(logRoot))System.IO.Directory.Delete(logRoot,true);}
   }
  }
 }

@@ -10,6 +10,7 @@ namespace ElymsPet {
   public readonly string Text;
   public readonly DateTime Time;
   public readonly string Meta;
+  internal GraphReadingSnapshot Reading;
   public ChatLine(ChatSpeaker speaker,string text,string meta) {
    Speaker=speaker;Text=text??"";Time=DateTime.Now;Meta=meta??"";
   }
@@ -51,6 +52,8 @@ namespace ElymsPet {
   readonly IClock clock;
   readonly List<ChatLine> lines=new List<ChatLine>();
   bool busy;
+  bool ownsGraphEdit;
+  ChatLine lastUserLine;
   int replyGeneration;
   bool sourceReadingAnnounced;
   string pendingBiliUser="";
@@ -84,14 +87,24 @@ namespace ElymsPet {
    ChatTurn[] history=session.History;
    for(int i=0;i<history.Length;i++) {
     lines.Add(new ChatLine(history[i].Role=="assistant"?ChatSpeaker.Elyms:ChatSpeaker.User,history[i].Content,"历史上下文"));
+    if(history[i].Role=="user"){lastUserLine=lines[lines.Count-1];LastUserInput=lastUserLine.Text;}
    }
    while(lines.Count>200)lines.RemoveAt(0);
    dsh.Finished+=OnDshFinished;
    bili.Finished+=OnBiliFinished;
   }
   public bool Busy {get {return busy;}}
-  public bool CanStop {get{return busy&&pendingBiliUser.Length==0&&(Graphs==null||!Graphs.Busy);}}
-  public void Stop(){if(!CanStop)return;replyGeneration++;work.CancelPending();busy=false;LiveReply="";LastHint="已停止等待。上一条原文可重新编辑发送。";LastMeta="已停止";Raise();}
+  public bool CanStop {get{return busy;}}
+  public bool CanResend {get{return !work.IsDisposed&&lastUserLine!=null;}}
+  public void Stop(){
+   if(!CanStop)return;replyGeneration++;work.CancelPending();
+   if(pendingBiliUser.Length>0)bili.CancelChatBrowse();pendingBiliUser="";
+   if(ownsGraphEdit&&Graphs!=null)Graphs.CancelGraphAi();ownsGraphEdit=false;
+   busy=false;LiveReply="";LastHint="已停止本次回复，可以重发消息。";LastMeta="已停止";
+   Add(new ChatLine(ChatSpeaker.Notice,LastHint,""));
+  }
+  public void ResendLast(){if(CanResend)Resend(lastUserLine);}
+  public void Resend(ChatLine line){if(work.IsDisposed||line==null||line.Speaker!=ChatSpeaker.User||!lines.Contains(line))return;if(busy)Stop();SendCore(line.Text,line.Reading);}
   public int ContextTokens {get {return session.ContextTokens;}}
   public int ContextLimit {get {return session.ContextLimit;}}
   public string ContextLabel {
@@ -109,6 +122,9 @@ namespace ElymsPet {
   }
   public ChatLine[] Lines {get {return lines.ToArray();}}
   public void Send(string raw) {
+   SendCore(raw,null);
+  }
+  void SendCore(string raw,GraphReadingSnapshot originalReading) {
    if(work.IsDisposed)return;
    if(busy) {Add(new ChatLine(ChatSpeaker.Notice,"正在等曳尔沐回复，这句话稍后再发吧。",""));return;}
    string text=(raw??"").Trim();
@@ -116,11 +132,11 @@ namespace ElymsPet {
    if(text.Length>MaxInputChars) {LastHint="内容超过 4000 字，请分段发送；原文未发送。";Raise();return;}
    LastUserInput=text;replyGeneration++;LiveReply="";
    feedback.Wake();
-   Add(new ChatLine(ChatSpeaker.User,text,""));
+   lastUserLine=new ChatLine(ChatSpeaker.User,text,""){Reading=originalReading};Add(lastUserLine);
    ApiKey.State key=ApiKey.Resolve(state);
    if(!state.AiChat) {Offline(text,"在线 AI 已关闭，这次先用离线对白陪你。");return;}
    if(!key.Configured) {Offline(text,"还没有配置 API Key。在「设置」里接入 DeepSeek，就能在线聊天。");return;}
-   graphReading=Graphs==null?null:Graphs.CaptureGraphReading(text);
+   graphReading=originalReading??(Graphs==null?null:Graphs.CaptureGraphReading(text));lastUserLine.Reading=graphReading;
    sourceReadingAnnounced=false;
    string memoryContext=memory.Recall(text);
    string biliQuery;
@@ -160,7 +176,7 @@ namespace ElymsPet {
    work.Run(delegate {
     Action<string> partial=reading==null?(Action<string>)(value=>{string visible=VisiblePartial(value);sourceScheduler.Post(delegate{if(!work.IsDisposed&&busy&&replyTicket==replyGeneration&&visible.Length>0){LiveReply=visible;LastHint="正在回复…";Raise();}});}):null;
     Func<ChatTurn[],ChatOutcome> complete=input=>DeepSeek.Complete(key.Key,baseUrl,model,true,input,timeout,4096,0.3,"low",4000,partial);
-    return reading==null?complete(turns):reading.Complete(turns,complete,state.DshEnabled&&PluginAccess.Enabled(state,"dsh"),()=>work.IsDisposed,ReportSourceProgress);
+    return reading==null?complete(turns):reading.Complete(turns,complete,state.DshEnabled&&PluginAccess.Enabled(state,"dsh"),()=>work.IsDisposed||replyTicket!=replyGeneration,message=>ReportSourceProgressFor(replyTicket,message));
    },delegate(ChatOutcome outcome) {Finish(text,outcome,memoryContext);});
   }
   public static string VisiblePartial(string text){text=text??"";int marker=text.IndexOf("[[",StringComparison.Ordinal);if(marker>=0)text=text.Substring(0,marker);else if(text.EndsWith("[",StringComparison.Ordinal))text=text.Substring(0,text.Length-1);return ChatText.Clip(text,4000);}
@@ -189,7 +205,7 @@ namespace ElymsPet {
    return false;
   }
   void OnBiliFinished(BiliBrowseResult result) {
-   if(result==null||!result.FromChat)return;
+   if(result==null||!result.FromChat||pendingBiliUser.Length==0)return;
    busy=false;
    if(!result.Ok) {
     Add(new ChatLine(ChatSpeaker.Notice,"B站没有逛成："+ChatText.Clip(result.Error,180),""));
@@ -213,7 +229,7 @@ namespace ElymsPet {
   }
   public void Clear() {
    if(busy) {Add(new ChatLine(ChatSpeaker.Notice,"等这次回复回来，再清空对话吧。",""));return;}
-   session.Clear();lines.Clear();
+   session.Clear();lines.Clear();lastUserLine=null;LastUserInput=null;graphReading=null;
    LastHint="对话记忆已经清空。";LastMeta="已清空";
    if(Cleared!=null)Cleared();
    Raise();
@@ -308,7 +324,7 @@ namespace ElymsPet {
    var reading=graphReading;int replyTicket=replyGeneration;
    work.Run(delegate {
     Func<ChatTurn[],ChatOutcome> complete=input=>WebAnswerCompletion.Complete(new ArchiveApi(),key,baseUrl,model,input);
-    return reading==null?complete(turns):reading.Complete(turns,complete,state.DshEnabled&&PluginAccess.Enabled(state,"dsh"),()=>work.IsDisposed,ReportSourceProgress);
+    return reading==null?complete(turns):reading.Complete(turns,complete,state.DshEnabled&&PluginAccess.Enabled(state,"dsh"),()=>work.IsDisposed||replyTicket!=replyGeneration,message=>ReportSourceProgressFor(replyTicket,message));
    },delegate(ChatOutcome outcome2) {FinishWeb(run,outcome2);});
   }
   void FinishWeb(WebRun run,ChatOutcome outcome) {
@@ -366,8 +382,6 @@ namespace ElymsPet {
    task=(task??"").Trim();
    if(task.Length==0)return;
    if(!state.DshEnabled) {Add(new ChatLine(ChatSpeaker.Notice,"DSH 委托在设置里关闭了，这次先不实际动手。",""));return;}
-   string error;var handshake=DshApi.ReadHandshake(out error);
-   if(handshake==null) {Add(new ChatLine(ChatSpeaker.Notice,"DSH 工作台没有运行，等打开 DSH 后我再把这件事交过去。",""));return;}
    string permission=state.DshFullAccess?"danger-full-access":"workspace-write";
    bool run=state.DshAutoRun;
    if(!run) {
@@ -411,7 +425,8 @@ namespace ElymsPet {
    if(LineAdded!=null)LineAdded(line);
    Raise();
   }
-  void ReportSourceProgress(string message){sourceScheduler.Post(delegate{if(work.IsDisposed||!busy)return;
+  void ReportSourceProgress(string message){ReportSourceProgressFor(replyGeneration,message);}
+  void ReportSourceProgressFor(int ticket,string message){sourceScheduler.Post(delegate{if(work.IsDisposed||!busy||ticket!=replyGeneration)return;
    if(!sourceReadingAnnounced){sourceReadingAnnounced=true;feedback.Act(6,"我在思考，正让 DSH 查阅本地源码…",20);}
    else if(message.StartsWith("DSH 已完成",StringComparison.Ordinal)&&!LastHint.StartsWith("DSH 已完成",StringComparison.Ordinal))feedback.Act(6,"代码查到了，我来整理回答…",12);
    LastHint=message;LastMeta=message;Raise();});}
@@ -424,8 +439,10 @@ namespace ElymsPet {
    string task=GraphEditing.Extract(ref reply);if(task.Length==0)return false;
    if(Graphs==null||truncated){busy=false;Add(new ChatLine(ChatSpeaker.Notice,"图谱编辑未执行：接口不可用或回复未完整结束。",""));Raise();return true;}
    busy=true;Add(new ChatLine(ChatSpeaker.Notice,"曳尔沐正在整理并保存图谱修改…",""));
-   if(graphReading!=null&&graphReading.HasView){Graphs.EditGraphWithAi("用户原话："+user+"\n编辑意图："+task,graphReading,delegate(GraphEditOutcome result){busy=false;session.Remember(user,result.Message);Add(new ChatLine(ChatSpeaker.Notice,result.Message,"图谱编辑结果"));LastHint=result.Message;Raise();});return true;}
-   Graphs.EditGraphWithAi("用户原话："+user+"\n编辑意图："+task,delegate(string result){busy=false;session.Remember(user,result);Add(new ChatLine(ChatSpeaker.Notice,result,"图谱编辑结果"));LastHint=result;Raise();});return true;
+   int ticket=replyGeneration;ownsGraphEdit=!Graphs.Busy;
+   Action<string> done=result=>{if(work.IsDisposed||ticket!=replyGeneration)return;ownsGraphEdit=false;busy=false;session.Remember(user,result);Add(new ChatLine(ChatSpeaker.Notice,result,"图谱编辑结果"));LastHint=result;Raise();};
+   if(graphReading!=null&&graphReading.HasView){Graphs.EditGraphWithAi("用户原话："+user+"\n编辑意图："+task,graphReading,result=>done(result.Message));return true;}
+   Graphs.EditGraphWithAi("用户原话："+user+"\n编辑意图："+task,done);return true;
   }
   void OnFailure(string error) {
    LiveReply="";

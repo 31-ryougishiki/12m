@@ -29,6 +29,8 @@ namespace ElymsPet {
   readonly string root,packages,registryPath;readonly bool preview;
   PluginRegistry registry;readonly HashSet<string> active=new HashSet<string>();readonly Dictionary<string,string> paths=new Dictionary<string,string>(),errors=new Dictionary<string,string>();
   public bool PendingRestart {get;private set;}
+  readonly HashSet<string> pending=new HashSet<string>();
+  public bool RequiresRestart(string id){return pending.Contains(id);}
   public string Status {get;private set;}
   public PluginManager(string dataFolder,string applicationFolder,bool preview){
    this.preview=preview;root=Path.Combine(dataFolder,"plugins");registryPath=Path.Combine(root,"installed.json");packages=Path.Combine(applicationFolder,"plugin-packages");Status="";
@@ -53,7 +55,7 @@ namespace ElymsPet {
   public bool Enabled(string id){return active.Contains(id);}
   public bool Installed(string id){return Find(id)!=null;}
   public bool DesiredEnabled(string id){var item=Find(id);return item!=null&&item.Enabled;}
-  public string StateText(string id){string error;if(errors.TryGetValue(id,out error))return error;var item=Find(id);return item==null?"未安装":item.Hash!=Package(id).Hash?"有更新，需要修复":item.Enabled?"已安装 · 已启用":"已安装 · 已停用";}
+  public string StateText(string id){var item=Find(id);if(RequiresRestart(id))return item==null?"卸载待重启":!item.Enabled?"停用待重启":Enabled(id)?"更新待重启":"启用待重启 · 重启后显示圆盘入口";string error;if(errors.TryGetValue(id,out error))return error;return item==null?"未安装":item.Hash!=Package(id).Hash?"有更新，需要修复":item.Enabled?"已安装 · 已启用":"已安装 · 已停用";}
   bool Persist(PluginRegistry next){string error;if(!JsonFile.Save(registryPath,next,root,out error)){Status="未应用："+error;return false;}registry=next;PendingRestart=true;Status="已保存，重启桌宠后生效。数据和账号配置保留。";return true;}
   PluginRegistry Copy(){return GraphEditing.Parse<PluginRegistry>(GraphEditing.Json(registry));}
   public bool Change(string id,string action){
@@ -66,7 +68,7 @@ namespace ElymsPet {
     }else if(action=="remove"){next.Items.RemoveAll(x=>x!=null&&x.Id==id);}
     else if(action=="enable"||action=="disable"){if(item==null)throw new InvalidOperationException("请先安装插件。");if(action=="enable")Verify(p,InstalledPath(id,item.Hash));item.Enabled=action=="enable";}
     else throw new InvalidOperationException("未知操作。");
-    return Persist(next);
+    if(!Persist(next))return false;pending.Add(id);return true;
    }catch(Exception ex){Status="未应用："+ex.Message;return false;}
   }
   void CleanRemovedFiles(){foreach(var p in Catalog){string folder=Path.Combine(root,"installed",p.Id);if(!Directory.Exists(folder))continue;foreach(string dir in Directory.GetDirectories(folder)){string hash=Path.GetFileName(dir);if(!ValidHash(hash))continue;var item=Find(p.Id);if(item!=null&&item.Hash==hash)continue;try{File.Delete(Path.Combine(dir,"module.dll"));File.Delete(Path.Combine(dir,"module.dll.tmp"));if(Directory.GetFileSystemEntries(dir).Length==0)Directory.Delete(dir);}catch{Status="部分旧插件文件将在下次启动清理。";}}}}

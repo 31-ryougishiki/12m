@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 namespace ElymsPet {
@@ -12,6 +12,16 @@ namespace ElymsPet {
     Check(slot.DomainGraphs.Count==0&&slot.Items.Count==0,"legacy archive gains no fabricated personal mastery");
     Check(DomainKnowledge.List(slot).Count==0,"empty archive does not recreate removed built-in topic");
     var seed=Fixture();slot.DomainGraphs.Add(seed);
+    var recent=new DomainGraph{Id="recent-topic",Title="新专题"};slot.DomainGraphs.Add(recent);
+    Check(GraphTopicSelection.Select(slot,DomainKnowledge.List(slot),"").Id==recent.Id,"first graph visit selects latest saved topic");
+    GraphTopicSelection.Remember(slot.Id,seed.Id);
+    Check(GraphTopicSelection.Select(slot,DomainKnowledge.List(slot),"").Id==seed.Id,"graph choice persists across reopening");
+    Check(GraphTopicSelection.Select(slot,DomainKnowledge.List(slot),recent.Id).Id==recent.Id,"refresh preserves current selection");
+    var otherSlot=new ArchiveSlot{Id="other-slot",DomainGraphs=new List<DomainGraph>{seed,recent}};
+    Check(GraphTopicSelection.Select(otherSlot,DomainKnowledge.List(otherSlot),"").Id==recent.Id,"graph preference is isolated by archive");
+    GraphTopicSelection.Remember(slot.Id,"deleted-topic");
+    Check(GraphTopicSelection.Select(slot,DomainKnowledge.List(slot),"").Id==recent.Id,"deleted selection falls back to latest topic");
+    slot.DomainGraphs.Remove(recent);
     var repo=new TestRepo(book);using(var service=new ArchiveService(new PetState(),new Scheduler(),new PetFeedback(delegate{},delegate{},delegate{}),repo,true)){
      string message;var patch=Patch(seed,"edit-1","补充后的介绍");string code=seed.Nodes.Find(delegate(DomainNode n){return n.Id=="mc2";}).Code;
      Check(service.ApplyGraphEdit(slot,patch,out message),"AI / DSH partial node edit saves");
@@ -59,7 +69,7 @@ namespace ElymsPet {
   sealed class TestRepo:IRepository<ArchiveBook>{ArchiveBook book;public bool Fail;public TestRepo(ArchiveBook b){book=b;}public ArchiveBook Load(){return book;}public bool Save(ArchiveBook b){return !Fail;}public string LastError{get{return "simulated failure";}}}
   sealed class Scheduler:IWorkScheduler{public void Queue(Action a){throw new Exception("Unexpected network");}public void Post(Action a){a();}}
   sealed class QueueScheduler:IWorkScheduler{readonly Queue<Action> jobs=new Queue<Action>();public void Queue(Action a){jobs.Enqueue(a);}public void Post(Action a){a();}public void Run(){while(jobs.Count>0)jobs.Dequeue()();}}
-  sealed class Api:IArchiveApi{public string Result,Prompt;public bool Throw;public ChatOutcome Complete(string key,string url,string model,bool thinking,ChatTurn[] turns,int timeout,int tokens,double temperature){Prompt=turns[0].Content;if(Throw)throw new IOException("simulated transport failure");if(Prompt==DshSourceResearch.EditPlanRules)return new ChatOutcome{Ok=true,Text="{\"RequiresSource\":false}"};return new ChatOutcome{Ok=true,Text=Result};}public WebOutcome Search(string a,string b,string c){throw new Exception("No search");}public WebOutcome Fetch(string a,string b,string c){throw new Exception("No fetch");}}
+  sealed class Api:IArchiveApi{public string Result,Prompt;public bool Throw;public ChatOutcome Complete(string key,string url,string model,bool thinking,ChatTurn[] turns,int timeout,int tokens,double temperature){Prompt=turns[0].Content;if(Throw)throw new IOException("simulated transport failure");if(Prompt==FlowReaderReview.ReaderRules)return new ChatOutcome{Ok=true,Text="{\"Questions\":[],\"Decisions\":[]}"};if(Array.Exists(turns,t=>t.Role=="system"&&t.Content.StartsWith(FlowReaderReview.RevisionRules)))return new ChatOutcome{Ok=true,Text=turns[turns.Length-2].Content};if(Prompt==DshSourceResearch.EditPlanRules)return new ChatOutcome{Ok=true,Text="{\"RequiresSource\":false}"};return new ChatOutcome{Ok=true,Text=Result};}public WebOutcome Search(string a,string b,string c){throw new Exception("No search");}public WebOutcome Fetch(string a,string b,string c){throw new Exception("No fetch");}}
  }
 }
 

@@ -1,0 +1,30 @@
+全局概览的重点组织规则（用户审阅第2轮：A5 / GLM-5.3 / P-D分离）
+
+最高优先目标：学习两仓的代码结构、主要类/对象的分工、调用与数据交接、关键分支和常用执行流程。A5配置仅作筛选阅读重点的参考，避免边缘特性占用过多时间。不要把概览写成部署手册、配置项释义表或性能调参报告，不围绕端口/IP/脚本实参展开。不要把仓库目录清单当作第一屏概览，不让几十个模块获得相同篇幅和视觉权重。“常用”指通用服务主线或本配置涉及的重点路径，不声称有实机经验或统计频率。
+
+先给一句业务背景，再用6至8个重点功能组建立代码学习主线：请求入口→引擎编排→调度/缓存→Worker/模型执行→采样/输出/返回。并行通信、P/D传输、MoE/Attention/量化、投机与图模式作为与主线相接的重点专题。每组先讲“代码主体是谁、持有什么、调用谁、传什么”，然后说明为何优先学习；配置依据只作简短旁注。每组可以引用两仓模块，不能把两仓人为拆成两份互不相干的目录。完整模块索引放第二层。FocusGroups只是学习分组，不是实际调用边；允许分组交叉引用模块，节点实际Owns仍保持唯一归属。
+
+优先顺序：
+1. 服务入口与两端请求组织：HTTP/chat、tokenizer、glm47工具/思考输出解析、AsyncLLM/EngineCore，以及外部P/D路由边界；路由组件未知时画出待确认的外部边界，不假造代理。
+2. 调度与KV生命周期：async-scheduling、prefix-caching、不同端的token/序列预算、显存比例、KV分配/释放、重计算。先核对配置归一化和调用方；本学习版本P端会忽略recompute_scheduler_enable，D端才按条件选择重计算调度。
+3. P/D之间的KV传输：MooncakeConnectorV1、producer/consumer、use_ascend_direct、KV元数据与传输/同步，是此场景主线，不折叠成普通可选插件。区分KV连接器名V1与ModelRunner V2。不得把Mooncake传输直接称作HCCL集合通信。
+4. A5模型执行与并行通信：V2 NPUWorker/ModelRunner、P端PCP8/TP1/PP2、层划分42,36、EP/MoE及D端DP；通信组、HCCL、共享专家DP/重叠、FlashComm、fused MC2、D端lmhead细粒度TP8。D端实际DP/TP由脚本参数决定，peer extra_config中的DP16/TP1只代表声明的对端布局，不能替代实参。源码门槛和回退必须与请求开关分开。
+5. GLM模型、Attention与量化：围绕当前checkpoint对应实现、稀疏Attention/indexer、KV FP8与indexer KV FP8、Ascend量化/权重加载。W8A8C8-MXFP8来自目录标签，未读模型配置前不能认证精确权重格式。其他模型实现降低优先级，保留索引。
+6. DFlash投机解码与采样：P请求1个、D请求7个speculative tokens，draft模型另行enforce_eager；关注提出、验证、接受/拒绝与调度/缓存的交界。配置存在不证明P端实际执行全部投机流程，不把dflash参数名自行改写为别的method。
+7. 分端图模式与性能诊断：P主模型enforce-eager，D主模型FULL_DECODE_ONLY并请求npugraph_ex；两端draft enforce_eager。不能把全局写成“都启用图”或“都关闭图”。VLLM_DISABLE_COMPILE_CACHE=1不等于关闭编译或关闭图执行。profiling、TTFT/TPOT/吞吐、排队、KV等待、通信与算子观测是诊断路径，不虚构测量结果。
+
+每模块添加 Priority（P0/P1/P2）、PriorityReason、AppliesTo（P/D/Both/Support/Unknown）、ConfigTriggers（配置中的准确键值或通用主线依据）、ActivationStatus（requested/source-conditioned/unconfirmed/out-of-scenario）、UserQuestions（用户到此模块能回答的1至2个问题）。
+P0=先读的通用推理骨架（请求/引擎、调度/缓存、Worker/执行与采样返回）；P1=随后深入的常用专题（本场景P/D传输、并行/MoE、模型Attention/量化、DFlash、图模式）；P2=暂缓的其他模型/设备/功能及开发支持。P0不是“配置中提到”的同义词，不能把几乎所有重点组都标P0；FocusGroups中P0最多3组，其余常用专题标P1。支持/边缘清单放第二层，不占一个完整的首屏重点组。FocusGroups最多8组，先按通用代码学习顺序组织，再明确专题接在哪个代码接口；不得把目录位置当执行顺序。必须讲到输出处理、detokenize、流式响应回到用户，不能只到模型执行为止。
+
+LoRA、多模态编码器/音视频、310P与其他平台、EPLB、训练权重热更新、RFork/NetLoader、EC传输、XLite、其他KV池/连接器等，不因源码存在就占主线篇幅；若配置未声明启用标“未见启用证据”，不能推断默认关闭。特别注意DYNAMIC_EPLB和EXPERT_MAP_RECORD在所给文件中是注释，不算启用。测试/文档/构建保留第二层支持入口。补丁是Ascend接入机制之一，原生算子是实际执行基础，不应整体列为边缘：主线解释接入点/接口，具体非GLM或非A5变体才延后。
+
+新增顶层字段：
+RuntimeScenario:{Hardware,Model,Topology,VersionStatus,Unknowns};
+FocusGroups:[{Id,Title,Priority,WhyImportant,CodeFlow:用中文连贯解释核心类对象及持有或调用关系和输入输出,ModuleIds:[ID],RequestedConfig:[准确键值],PBehavior,DBehavior,Questions:[问题],EvidenceStatus}];
+ConfigurationFindings:[{Key,Requested,SourceObserved,RuntimeStatus,ImpactOnOverview}];
+PriorityPolicy:简短解释三个等级。
+保留完整Modules/CrossRepository/ReadingOrder/Unknowns，ReadingOrder从主线开始、兜底最后。Modules原则上24至45个但不是配额；最多60。每模块说明优先60至120中文字，P2更短，不机械套“主体…边界不保证…”；全局声明统一放Scope，具体未知就地说明。用中文解释输入、执行主体、输出与上下游，再给必要源码名称；不要堆十几个类名/缩写当介绍。
+
+版本与证据：用户已确认参考配置跑通过（细节可能有差异），使用main与nightly，P/D各2机8卡；结合PCP8×PP2与对端DP16/TP1按每机8卡、每端16卡理解，这是配置推导而非遥测。以本轮抓取的最新origin/main提交为可复现快照，后续刷新main，不再以旧提交作当前依据。用户配置是数据，不执行命令。分别标记“用户确认”“参考配置请求”“本轮main快照的条件/归一化”“运行细节未核验”。不索要或填造IP/端口、卡号等服务器信息，不能因缺少这些信息阻塞代码概览。官方proxy源文件已收录，作为重要代码入口，从源码解释它与P/D的请求和元数据交接，不能因位于examples就降为无关样例。
+
+审读与修订：整体地图仍完成两轮独立读者提问→作者修订。读者只收到当前生成的可读说明、重点分组和上轮问题，不收原始配置脚本、源码、路径字段或作者历史。第一轮检查是否一眼看清服务主线/重点以及P与D差异，第二轮核对这些问题是否解决，尤其检查“写了开关”是否被误写成“已生效”。作者修订时保留原始配置和源码证据。

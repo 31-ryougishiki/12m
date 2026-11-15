@@ -43,7 +43,7 @@ foreach ($pluginId in @('archive','graph','bili','dsh','cloud')) {
     $pluginAssemblies += $pluginDll
 }
 $catalogPath = Join-Path $outDir 'official-plugins.json'
-ConvertTo-Json -InputObject @($catalog) -Depth 4 | Set-Content -LiteralPath $catalogPath -Encoding UTF8
+[System.IO.File]::WriteAllText($catalogPath, (ConvertTo-Json -InputObject @($catalog) -Depth 4), (New-Object System.Text.UTF8Encoding($false)))
 # Embed hashes in the host rather than trusting a mutable downloaded manifest.
 $argsList += '/resource:' + $catalogPath + ',official-plugins.json'
 & $compiler @argsList

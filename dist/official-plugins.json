@@ -2,7 +2,7 @@
     {
         "Id":  "archive",
         "Name":  "存档单元",
-        "Hash":  "f91548545f26b5e0e2b151fc5412e8988585ed62f76a55fa738ab437204ed125",
+        "Hash":  "b89924a60d5045c7d733215eeae4e081bc0a620b6e34bf3f800b89a669d3a811",
         "Description":  "交流新内容、整理流程、逐项补充与审阅。",
         "Permissions":  "本地存档读写；按请求调用 AI 和公开资料",
         "Api":  1,
@@ -11,7 +11,7 @@
     {
         "Id":  "graph",
         "Name":  "知识图谱",
-        "Hash":  "0785d9146c0e0fcb6ee46e0a38abb01798ae4c27fd45f430f57464a1aa8c5993",
+        "Hash":  "cfba292b2fb0163e8133e2c18a5f7c8b65aac1ffda7f4bb0054d9c6e9fd74e0c",
         "Description":  "领域图谱、节点编辑、关系浏览和 AI / DSH 编辑接收。",
         "Permissions":  "本地知识库读写；按请求读取映射仓库源码片段并调用 AI；读取图谱编辑请求",
         "Api":  1,
@@ -20,7 +20,7 @@
     {
         "Id":  "bili",
         "Name":  "B站",
-        "Hash":  "6e27f95dd9bd3114ac9460691c9dc06136263c66ccf478c7f5c72a05159ad09f",
+        "Hash":  "4462e52f7c92531585a080cb51a4673b4022ecf6a48ee06cf7f5419653538b60",
         "Description":  "搜索视频、阅读评论、登录和互动。",
         "Permissions":  "访问 B站；本机保存登录；发布或删除评论仍需确认",
         "Api":  1,
@@ -29,7 +29,7 @@
     {
         "Id":  "dsh",
         "Name":  "DSH 连接",
-        "Hash":  "7b94d7b07174d825a4d2eb852c9a3c2abbbfbadb73bfd43dd37e39c4268c91d5",
+        "Hash":  "5da0aca456bed6b50aa7825184d8fde1c1e897e08951246b30e63b48c9d7563a",
         "Description":  "委托任务、回传结果、传递流程与图谱路径。",
         "Permissions":  "连接本机 DSH；任务权限沿用 DSH 设置",
         "Api":  1,
@@ -38,7 +38,7 @@
     {
         "Id":  "cloud",
         "Name":  "云同步",
-        "Hash":  "570678f4735666d754a0a7fda659f16af980962d48cc5d83a96ac9be1b53bd7b",
+        "Hash":  "84d8ca44e04ce723f54551186a6178a7e99643309bdf42b276a53d2605122214",
         "Description":  "为共享存档与图谱上传版本和恢复备份。",
         "Permissions":  "访问已配置的 OSS；本机加密保存凭据",
         "Api":  1,

@@ -17,7 +17,7 @@ namespace ElymsPet {
   readonly TextBox search=Ui.Input("",36);
   readonly TextBlock heading=Text("",28,"#28324A"),status=Text("",13,"#247A7B");
   readonly Grid graphFrame=new Grid();
-  readonly StackPanel inspector=new StackPanel();readonly Grid body=new Grid();readonly Border detailFrame;readonly StackPanel graphArea;
+  readonly StackPanel inspector=new StackPanel();readonly Grid body=new Grid();readonly Border detailFrame;readonly DockPanel detailsBody;readonly StackPanel graphArea;
   readonly Button manualEdit,addNode;
   readonly DispatcherTimer searchTimer=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(180)};
   DomainGraph graph;KnowledgeGraphScene scene;string selected="",slotId="";int revision=-1,generation;
@@ -41,7 +41,7 @@ namespace ElymsPet {
    var frame=new Border{BorderBrush=Theme.Brush("#8996B5"),BorderThickness=new Thickness(1),Child=graphFrame,ClipToBounds=true};
    graphArea=Ui.Stack(studyTools,architectureBar,graphEditResultsHost,frame,Text("滚轮缩放 · 拖动空白平移 · 单击查看 · 双击编辑节点 · 拖选文字 Ctrl+C · 右键复制全文 · 对话同步当前图谱",12,"#5B6781"));
    manualEdit=EditAction("编辑节点",delegate{var node=Selected();if(node!=null)EditNode(node);});addNode=EditAction("＋ 新增节点",delegate{EditNode(null);});
-   var details=new DockPanel{MaxHeight=650};dismissDetails=EditAction("×",delegate{fullDetailsVisible=false;PositionFullscreenDetails();});dismissDetails.ToolTip="收起节点说明";dismissDetails.Visibility=Visibility.Collapsed;var editing=Ui.Row(CreateDetailsGrip(),manualEdit,addNode,dismissDetails);editing.Margin=new Thickness(0,0,0,12);DockPanel.SetDock(editing,Dock.Top);details.Children.Add(editing);details.Children.Add(new ScrollViewer{Content=inspector,VerticalScrollBarVisibility=ScrollBarVisibility.Auto});
+   var details=new DockPanel{MaxHeight=650};detailsBody=details;dismissDetails=EditAction("×",delegate{fullDetailsVisible=false;PositionFullscreenDetails();});dismissDetails.ToolTip="收起节点说明";dismissDetails.Visibility=Visibility.Collapsed;var editing=Ui.Row(CreateDetailsGrip(),manualEdit,addNode,dismissDetails);editing.Margin=new Thickness(0,0,0,12);DockPanel.SetDock(editing,Dock.Top);details.Children.Add(editing);details.Children.Add(new ScrollViewer{Content=inspector,VerticalScrollBarVisibility=ScrollBarVisibility.Auto});
    detailFrame=new Border{Background=Theme.Brush("#FFFFFF"),Padding=new Thickness(20),BorderBrush=Theme.Brush("#8996B5"),BorderThickness=new Thickness(1),Child=details};
    body.ColumnDefinitions.Add(new ColumnDefinition());body.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(0)});body.RowDefinitions.Add(new RowDefinition());body.RowDefinitions.Add(new RowDefinition());body.Children.Add(graphArea);body.Children.Add(detailFrame);
    var content=Ui.Stack(Text("ELYMS / KNOWLEDGE ARCHIVE   ▪ ▪ ▪",11,"#247A7B"),toolbar,Ui.Row(fullscreenButton,EditAction("体验 vLLM / Ascend 源码导览",delegate{var example=RepositoryLearningExample.Create();if(archive.SaveDomainGraph(example))SelectDomain(example.Id);})),heading,legend,body,status);

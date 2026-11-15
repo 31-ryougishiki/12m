@@ -25,9 +25,9 @@ namespace ElymsPet {
    return new Rect(left,top,Math.Max(1,right-left),Math.Max(1,bottom-top));
   }
   public bool ResizeDetails(int horizontal,int vertical,Point at){
-   if(!IsFullscreen||fullscreenStage==null||!detailFrame.IsVisible)return false;
+   if(!IsFullscreen||fullscreenOverlay==null||!detailFrame.IsVisible)return false;
    double left=Canvas.GetLeft(detailFrame),top=Canvas.GetTop(detailFrame);if(double.IsNaN(left)||double.IsNaN(top))return false;
-   var rect=ResizeDetailsRect(new Rect(left,top,detailFrame.ActualWidth,detailFrame.ActualHeight),horizontal,vertical,at,new Size(Math.Max(1,fullscreenStage.ActualWidth-18),Math.Max(1,fullscreenStage.ActualHeight-18)));
+   var rect=ResizeDetailsRect(new Rect(left,top,detailFrame.ActualWidth,detailFrame.ActualHeight),horizontal,vertical,at,new Size(Math.Max(1,fullscreenOverlay.ActualWidth-18),Math.Max(1,fullscreenOverlay.ActualHeight-18)));
    manualDetailsKey=DetailsKey;manualDetailsPosition=rect.TopLeft;manualDetailsSize=rect.Size;PositionFullscreenDetails();return true;
   }
   static Cursor DetailsResizeCursor(int horizontal,int vertical){
@@ -65,18 +65,24 @@ namespace ElymsPet {
    var toolbar=new DockPanel{Margin=new Thickness(14,12,14,12)};var exit=EditAction("退出全屏 · Esc",ExitFullscreen);DockPanel.SetDock(exit,Dock.Right);toolbar.Children.Add(exit);var reset=EditAction("定位当前节点",delegate{manualDetailsPosition=null;CenterSelected();fullDetailsVisible=true;RequestFullscreenPosition();});DockPanel.SetDock(reset,Dock.Right);toolbar.Children.Add(reset);var title=Text("",22,"#28324A");title.SetBinding(TextBlock.TextProperty,new Binding("Text"){Source=heading});title.TextTrimming=TextTrimming.CharacterEllipsis;title.TextWrapping=TextWrapping.NoWrap;toolbar.Children.Add(title);fullscreenHeader=new StackPanel();fullscreenHeader.Children.Add(toolbar);graphArea.Children.Remove(studyTools);studyTools.Margin=new Thickness(14,0,14,8);fullscreenHeader.Children.Add(studyTools);graphArea.Children.Remove(architectureBar);architectureBar.Margin=new Thickness(14,0,14,8);fullscreenHeader.Children.Add(architectureBar);graphArea.Children.Remove(graphEditResultsHost);graphEditResultsHost.Margin=new Thickness(14,0,14,0);fullscreenHeader.Children.Add(graphEditResultsHost);layout.Children.Add(fullscreenHeader);
    fullscreenStage=new Grid{ClipToBounds=true,Margin=new Thickness(14,0,14,0),Background=canvas.Background};Grid.SetRow(fullscreenStage,1);layout.Children.Add(fullscreenStage);
    graphFrame.Children.Remove(viewport);body.Children.Remove(detailFrame);viewport.Height=double.NaN;fullscreenStage.Children.Add(viewport);
-   fullscreenOverlay=new Canvas();fullscreenStage.Children.Add(fullscreenOverlay);detailFrame.Margin=new Thickness(0);detailFrame.BorderBrush=Theme.Brush("#5368B2");detailFrame.BorderThickness=new Thickness(2);fullscreenOverlay.Children.Add(detailFrame);dismissDetails.Visibility=Visibility.Visible;
-   var footer=new StackPanel{Margin=new Thickness(14,8,14,0)};footer.Children.Add(Text("点击节点查看说明 · 点击框外收起 · 拖动说明框边框缩放 · 拖动空白平移 · 滚轮缩放图谱 · Ctrl + 滚轮调整字号 · 拖选文字 Ctrl+C · 右键复制全文 · 对话同步当前图谱",12,"#687794"));var message=Text("",12,"#247A7B");message.SetBinding(TextBlock.TextProperty,new Binding("Text"){Source=status});footer.Children.Add(message);Grid.SetRow(footer,2);layout.Children.Add(footer);
+   fullscreenOverlay=new Canvas();Grid.SetRowSpan(fullscreenOverlay,3);Panel.SetZIndex(fullscreenOverlay,10);layout.Children.Add(fullscreenOverlay);detailFrame.Margin=new Thickness(0);detailFrame.BorderBrush=Theme.Brush("#5368B2");detailFrame.BorderThickness=new Thickness(2);fullscreenOverlay.Children.Add(detailFrame);dismissDetails.Visibility=Visibility.Visible;
+   var footer=new StackPanel{Margin=new Thickness(14,8,14,0)};footer.Children.Add(Text("点击节点查看说明 · 点击图谱空白收起 · 拖动说明框边框缩放 · 拖动空白平移 · 滚轮缩放图谱 · Ctrl + 滚轮调整字号 · 拖选文字 Ctrl+C · 右键复制全文 · 对话同步当前图谱",12,"#687794"));var message=Text("",12,"#247A7B");message.SetBinding(TextBlock.TextProperty,new Binding("Text"){Source=status});footer.Children.Add(message);Grid.SetRow(footer,2);layout.Children.Add(footer);
    var control=owner as ControlWindow;window.Content=new ReadingZoom(window,layout,control==null?1:control.ReadingView.Factor,delegate(double value){if(control!=null)control.ReadingView.SetFactor(value);RequestFullscreenPosition();});
    window.PreviewKeyDown+=FullscreenKey;window.PreviewMouseDown+=FullscreenOutsideClick;window.Closed+=FullscreenClosed;viewport.ScrollChanged+=FullscreenScroll;fullscreenStage.SizeChanged+=FullscreenSize;
    GraphCopyText.Enable(window);
    window.Show();window.UpdateLayout();CenterSelected();RequestFullscreenPosition();
   }
   void FullscreenKey(object sender,KeyEventArgs e){if(e.Key==Key.Escape||e.Key==Key.F11){ExitFullscreen();e.Handled=true;}}
+  static bool Within(DependencyObject source,DependencyObject ancestor){
+   for(var current=source;current!=null;current=current is Visual?VisualTreeHelper.GetParent(current):LogicalTreeHelper.GetParent(current))if(current==ancestor)return true;
+   return false;
+  }
   void FullscreenOutsideClick(object sender,MouseButtonEventArgs e){
    if(e.ChangedButton==MouseButton.Right)return;
-   for(var current=e.OriginalSource as DependencyObject;current!=null;current=current is Visual?VisualTreeHelper.GetParent(current):LogicalTreeHelper.GetParent(current))if(current==detailFrame)return;
-   // Do not consume the click: nodes can open their own details and the canvas can still pan.
+   var source=e.OriginalSource as DependencyObject;
+   if(Within(source,detailFrame))return;
+   // Only the graph node area dismisses the callout; the consultation bar, toolbar and footer stay usable.
+   if(!Within(source,fullscreenStage))return;
    fullDetailsVisible=false;PositionFullscreenDetails();
   }
   void FullscreenScroll(object sender,ScrollChangedEventArgs e){RequestFullscreenPosition();}
@@ -86,7 +92,7 @@ namespace ElymsPet {
    var window=(Window)sender;window.Closed-=FullscreenClosed;window.PreviewKeyDown-=FullscreenKey;window.PreviewMouseDown-=FullscreenOutsideClick;viewport.ScrollChanged-=FullscreenScroll;fullscreenStage.SizeChanged-=FullscreenSize;
    DetachDetailsResize();EndDetailsResize();detailFrame.Cursor=null;detailsBody.MaxHeight=650;
    double x=(viewport.HorizontalOffset+viewport.ViewportWidth/2)/scale.ScaleX,y=(viewport.VerticalOffset+viewport.ViewportHeight/2)/scale.ScaleY;
-   fullscreenHeader.Children.Remove(graphEditResultsHost);graphArea.Children.Insert(0,graphEditResultsHost);graphEditResultsHost.Margin=new Thickness(0);fullscreenHeader.Children.Remove(architectureBar);graphArea.Children.Insert(0,architectureBar);architectureBar.Margin=new Thickness(0,0,0,10);fullscreenHeader.Children.Remove(studyTools);graphArea.Children.Insert(0,studyTools);studyTools.Margin=new Thickness(0,0,0,12);fullscreenHeader=null;fullscreenOverlay.Children.Remove(detailFrame);fullscreenStage.Children.Remove(viewport);fullscreenWindow=null;fullscreenOverlay=null;fullscreenStage=null;
+   fullscreenHeader.Children.Remove(graphEditResultsHost);graphArea.Children.Insert(0,graphEditResultsHost);graphEditResultsHost.Margin=new Thickness(0);fullscreenHeader.Children.Remove(architectureBar);graphArea.Children.Insert(0,architectureBar);architectureBar.Margin=new Thickness(0,0,0,10);fullscreenHeader.Children.Remove(studyTools);graphArea.Children.Insert(0,studyTools);studyTools.Margin=new Thickness(0,0,0,12);fullscreenHeader=null;fullscreenOverlay.Children.Remove(detailFrame);var overlayParent=fullscreenOverlay.Parent as Panel;if(overlayParent!=null)overlayParent.Children.Remove(fullscreenOverlay);fullscreenStage.Children.Remove(viewport);fullscreenWindow=null;fullscreenOverlay=null;fullscreenStage=null;
    viewport.Height=540;graphFrame.Children.Insert(0,viewport);body.Children.Add(detailFrame);detailFrame.Width=double.NaN;detailFrame.Height=double.NaN;detailFrame.Visibility=Visibility.Visible;detailFrame.BorderBrush=Theme.Brush("#8996B5");detailFrame.BorderThickness=new Thickness(1);dismissDetails.Visibility=Visibility.Collapsed;detailsGrip.Visibility=Visibility.Collapsed;manualDetailsPosition=null;manualDetailsSize=null;resizingDetails=false;ArrangeBody(((FrameworkElement)Root).ActualWidth>=1100);
    if(!disposed){((FrameworkElement)Root).UpdateLayout();viewport.ScrollToHorizontalOffset(Math.Max(0,x*scale.ScaleX-viewport.ViewportWidth/2));viewport.ScrollToVerticalOffset(Math.Max(0,y*scale.ScaleY-viewport.ViewportHeight/2));}
   }
@@ -97,7 +103,7 @@ namespace ElymsPet {
   void PositionFullscreenDetails(){
    if(!IsFullscreen)return;
    var node=scene==null?null:scene.Nodes.Find(delegate(GraphNodePlacement p){return p.Item.Id==selected;});
-   double width=fullscreenStage.ActualWidth-18,height=fullscreenStage.ActualHeight-18;
+   double width=fullscreenOverlay.ActualWidth-18,height=fullscreenOverlay.ActualHeight-18;
    if(!fullDetailsVisible||node==null||width<100||height<100){detailFrame.Visibility=Visibility.Hidden;return;}
    if(manualDetailsKey!=DetailsKey)manualDetailsPosition=null;
    if(manualDetailsPosition.HasValue){var moved=ClampDetails(manualDetailsPosition.Value,manualDetailsSize??new Size(DetailsDefaultWidth,DetailsDefaultHeight),new Size(width,height));manualDetailsPosition=moved.TopLeft;detailFrame.Width=moved.Width;detailFrame.Height=moved.Height;Canvas.SetLeft(detailFrame,moved.X);Canvas.SetTop(detailFrame,moved.Y);detailFrame.Visibility=Visibility.Visible;return;}

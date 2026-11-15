@@ -1,1 +1,1 @@
-﻿PASS popup checks=177 real popups opened=75 distinct application hints=27
+PASS popup checks=182 real popups opened=75 distinct application hints=27

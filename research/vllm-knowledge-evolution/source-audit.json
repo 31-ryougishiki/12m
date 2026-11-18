@@ -1,0 +1,179 @@
+{
+  "Date": "2026-11-16",
+  "ReadOnly": true,
+  "Scope": "Node Sources and Learning.CodeUrl only; source bytes and AST comparisons do not prove claim correctness or runtime compatibility.",
+  "LocalHeads": {
+    "vllm": "5e51c0ca1041168de7aa9e096982aebaeebabd38",
+    "vllm-ascend": "3649b8ff7fd69e707db2c634073d2b4c40eadf15"
+  },
+  "Topics": [
+    {
+      "TopicId": "vllm-ascend-source",
+      "GraphRevision": "15484281c15291d355324b4815dfc117229f7a1b5c7a7cda17204f96239210fd",
+      "Nodes": 63,
+      "Edges": 95,
+      "Modules": 17,
+      "NodesWithPinnedCode": 63,
+      "Repositories": [
+        {
+          "Repository": "vllm",
+          "SourceCommits": [
+            "c021a8b0a9049c39db7142823126b1c28a4fb85b"
+          ],
+          "UniqueCommitPathPairs": 25,
+          "UnchangedCount": 5,
+          "ChangedPaths": [
+            "vllm/model_executor/models/deepseek_v2.py",
+            "vllm/model_executor/models/registry.py",
+            "vllm/platforms/interface.py",
+            "vllm/v1/core/kv_cache_config_builder.py",
+            "vllm/v1/core/kv_cache_manager.py",
+            "vllm/v1/core/kv_cache_planning.py",
+            "vllm/v1/core/sched/output.py",
+            "vllm/v1/core/sched/scheduler.py",
+            "vllm/v1/core/single_type_kv_cache_manager.py",
+            "vllm/v1/engine/__init__.py",
+            "vllm/v1/engine/async_llm.py",
+            "vllm/v1/engine/core.py",
+            "vllm/v1/engine/core_client.py",
+            "vllm/v1/engine/output_processor.py",
+            "vllm/v1/executor/abstract.py",
+            "vllm/v1/request.py",
+            "vllm/v1/worker/gpu/model_runner.py",
+            "vllm/v1/worker/gpu/spec_decode/rejection_sampler.py",
+            "vllm/v1/worker/gpu_worker.py",
+            "vllm/v1/worker/worker_base.py"
+          ],
+          "MissingPaths": []
+        },
+        {
+          "Repository": "vllm-ascend",
+          "SourceCommits": [
+            "e4d533d33211f0696bcdf65eda47245d52e428c5"
+          ],
+          "UniqueCommitPathPairs": 19,
+          "UnchangedCount": 11,
+          "ChangedPaths": [
+            "vllm_ascend/attention/attention_v1.py",
+            "vllm_ascend/attention/mla_v1.py",
+            "vllm_ascend/core/kv_cache_interface.py",
+            "vllm_ascend/patch/__init__.py",
+            "vllm_ascend/patch/platform/patch_kv_cache_utils.py",
+            "vllm_ascend/platform.py",
+            "vllm_ascend/worker/v2/model_runner.py",
+            "vllm_ascend/worker/worker.py"
+          ],
+          "MissingPaths": []
+        }
+      ]
+    },
+    {
+      "TopicId": "vllm-ascend-global-main-20261115",
+      "GraphRevision": "041614b22a6abf67d14b5cea0ea32f7d2746e3f24da3b325f864049172217591",
+      "Nodes": 169,
+      "Edges": 99,
+      "Modules": 44,
+      "NodesWithPinnedCode": 169,
+      "Repositories": [
+        {
+          "Repository": "vllm",
+          "SourceCommits": [
+            "5e51c0ca1041168de7aa9e096982aebaeebabd38"
+          ],
+          "UniqueCommitPathPairs": 70,
+          "UnchangedCount": 70,
+          "ChangedPaths": [],
+          "MissingPaths": []
+        },
+        {
+          "Repository": "vllm-ascend",
+          "SourceCommits": [
+            "3649b8ff7fd69e707db2c634073d2b4c40eadf15"
+          ],
+          "UniqueCommitPathPairs": 123,
+          "UnchangedCount": 123,
+          "ChangedPaths": [],
+          "MissingPaths": []
+        }
+      ]
+    },
+    {
+      "TopicId": "archive:vllm-ascend",
+      "GraphRevision": "16bac67707be87016cdd4c8e498b3298b2f497529dc4ee310b0c5b04924e4110",
+      "Nodes": 13,
+      "Edges": 0,
+      "Modules": 0,
+      "NodesWithPinnedCode": 0,
+      "Repositories": [
+        {
+          "Repository": "vllm",
+          "SourceCommits": [],
+          "UniqueCommitPathPairs": 0,
+          "UnchangedCount": 0,
+          "ChangedPaths": [],
+          "MissingPaths": []
+        },
+        {
+          "Repository": "vllm-ascend",
+          "SourceCommits": [],
+          "UniqueCommitPathPairs": 0,
+          "UnchangedCount": 0,
+          "ChangedPaths": [],
+          "MissingPaths": []
+        }
+      ]
+    }
+  ],
+  "SymbolComparisons": [
+    {
+      "Repository": "vllm",
+      "Path": "vllm/v1/engine/core.py",
+      "Symbol": "EngineCore.step",
+      "OldCommit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "NewCommit": "5e51c0ca1041168de7aa9e096982aebaeebabd38",
+      "OldLines": [
+        718,
+        750
+      ],
+      "NewLines": [
+        703,
+        735
+      ],
+      "ASTEqual": true
+    },
+    {
+      "Repository": "vllm",
+      "Path": "vllm/v1/engine/core.py",
+      "Symbol": "EngineCore._initialize_kv_caches",
+      "OldCommit": "c021a8b0a9049c39db7142823126b1c28a4fb85b",
+      "NewCommit": "5e51c0ca1041168de7aa9e096982aebaeebabd38",
+      "OldLines": [
+        276,
+        465
+      ],
+      "NewLines": [
+        285,
+        447
+      ],
+      "ASTEqual": false
+    },
+    {
+      "Repository": "vllm-ascend",
+      "Path": "vllm_ascend/worker/worker.py",
+      "Symbol": "NPUWorker.init_device",
+      "OldCommit": "e4d533d33211f0696bcdf65eda47245d52e428c5",
+      "NewCommit": "3649b8ff7fd69e707db2c634073d2b4c40eadf15",
+      "OldLines": [
+        566,
+        594
+      ],
+      "NewLines": [
+        577,
+        605
+      ],
+      "ASTEqual": true
+    }
+  ],
+  "AscendDeclaredVllmMain": "24420b7a341af37a9bc3186e6fc6062512e0aa58",
+  "AscendDeclaredVllmRelease": "v0.33.0"
+}
